@@ -1,0 +1,33 @@
+# Copy this file to .mewcode/config.yaml. Keep real credentials in environment variables.
+providers:
+  - name: deepseek
+    protocol: openai-compat
+    base_url: https://api.deepseek.com
+    api_key: "" # resolved from OPENAI_API_KEY
+    model: deepseek-chat
+    thinking: false
+    context_window: 128000
+    max_output_tokens: 8192
+
+permission_mode: default
+enable_coordinator_mode: false
+enable_fork: true
+
+# Start examples/a2a-static-analysis-agent before enabling this remote Agent.
+a2a_agents:
+  - name: static-analysis
+    card_url: http://localhost:8001/.well-known/agent-card.json
+    timeout_seconds: 120
+    poll_interval_ms: 500
+    enabled: true
+
+context_policy:
+  enabled: true
+  max_tool_schemas: 24
+  max_schema_chars: 30000
+  max_memory_chars: 12000
+
+# mcp_servers:
+#   - name: context7
+#     command: npx
+#     args: ["-y", "@upstash/context7-mcp"]

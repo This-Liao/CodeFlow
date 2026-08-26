@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="820" viewBox="0 0 1400 820" role="img" aria-labelledby="title desc">
+  <title id="title">CodeFlow architecture</title>
+  <desc id="desc">Java agent harness coordinating local agents, MCP tools, a Python A2A agent, durable state, and evaluation</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#08111f"/><stop offset="1" stop-color="#12172c"/></linearGradient>
+    <linearGradient id="main" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#142d4c"/><stop offset="1" stop-color="#24204f"/></linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#8ba5d6"/></marker>
+    <filter id="shadow"><feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#000" flood-opacity=".35"/></filter>
+    <style>
+      .box{fill:#111d31;stroke:#38547e;stroke-width:2}.main{fill:url(#main);stroke:#6f7ff5;stroke-width:2.5}.store{fill:#102a27;stroke:#3fcf9b;stroke-width:2}.remote{fill:#2b1834;stroke:#e15da9;stroke-width:2}.label{fill:#f3f7ff;font:700 22px 'Segoe UI',Arial,sans-serif}.sub{fill:#b9c8e5;font:16px 'Segoe UI',Arial,sans-serif}.tiny{fill:#9fb2d4;font:14px Consolas,monospace}.flow{fill:none;stroke:#8ba5d6;stroke-width:3;marker-end:url(#arrow)}.dash{stroke-dasharray:9 8}.tag{fill:#172540;stroke:#425e8b}.tagtext{fill:#cfe0ff;font:14px Consolas,monospace}
+    </style>
+  </defs>
+  <rect width="1400" height="820" rx="28" fill="url(#bg)"/>
+  <text x="70" y="62" class="label" font-size="30">CodeFlow — long-horizon agent infrastructure</text>
+
+  <g filter="url(#shadow)">
+    <rect x="70" y="112" width="250" height="170" rx="18" class="box"/>
+    <text x="195" y="153" text-anchor="middle" class="label">Entry points</text>
+    <rect x="96" y="174" width="89" height="35" rx="17" class="tag"/><text x="140" y="197" text-anchor="middle" class="tagtext">TUI</text>
+    <rect x="198" y="174" width="96" height="35" rx="17" class="tag"/><text x="246" y="197" text-anchor="middle" class="tagtext">Web UI</text>
+    <rect x="96" y="222" width="89" height="35" rx="17" class="tag"/><text x="140" y="245" text-anchor="middle" class="tagtext">CLI</text>
+    <rect x="198" y="222" width="96" height="35" rx="17" class="tag"/><text x="246" y="245" text-anchor="middle" class="tagtext">Resume</text>
+
+    <rect x="410" y="92" width="570" height="330" rx="24" class="main"/>
+    <text x="695" y="137" text-anchor="middle" class="label">Java 21 Agent Harness</text>
+    <text x="695" y="165" text-anchor="middle" class="sub">Streaming ReAct loop · permissions · hooks · retries</text>
+    <rect x="448" y="195" width="225" height="86" rx="15" class="box"/><text x="560" y="226" text-anchor="middle" class="label" font-size="19">Context Policy</text><text x="560" y="253" text-anchor="middle" class="tiny">stage · relevance · budget</text>
+    <rect x="717" y="195" width="225" height="86" rx="15" class="box"/><text x="829" y="226" text-anchor="middle" class="label" font-size="19">Tool Runtime</text><text x="829" y="253" text-anchor="middle" class="tiny">parallel read · safe writes</text>
+    <rect x="448" y="308" width="225" height="79" rx="15" class="box"/><text x="560" y="339" text-anchor="middle" class="label" font-size="19">Compact + Memory</text><text x="560" y="365" text-anchor="middle" class="tiny">session continuity</text>
+    <rect x="717" y="308" width="225" height="79" rx="15" class="box"/><text x="829" y="339" text-anchor="middle" class="label" font-size="19">ToolSearch</text><text x="829" y="365" text-anchor="middle" class="tiny">deferred capabilities</text>
+
+    <rect x="1065" y="112" width="265" height="170" rx="18" class="box"/>
+    <text x="1197" y="153" text-anchor="middle" class="label">Local agents</text>
+    <text x="1197" y="188" text-anchor="middle" class="sub">Teams · task board · mailbox</text>
+    <text x="1197" y="218" text-anchor="middle" class="sub">Background sub-agents</text>
+    <text x="1197" y="248" text-anchor="middle" class="tiny">isolated Git worktrees</text>
+
+    <rect x="70" y="515" width="300" height="190" rx="20" class="box"/>
+    <text x="220" y="558" text-anchor="middle" class="label">Tools + MCP</text>
+    <text x="220" y="596" text-anchor="middle" class="sub">Files · Bash · Search · Skills</text>
+    <text x="220" y="627" text-anchor="middle" class="sub">External data and services</text>
+    <text x="220" y="670" text-anchor="middle" class="tiny">permission + sandbox boundary</text>
+
+    <rect x="500" y="515" width="400" height="190" rx="20" class="remote"/>
+    <text x="700" y="555" text-anchor="middle" class="label">Remote Python Agent</text>
+    <text x="700" y="586" text-anchor="middle" class="sub">LangGraph static-analysis workflow</text>
+    <rect x="538" y="614" width="142" height="38" rx="19" class="tag"/><text x="609" y="638" text-anchor="middle" class="tagtext">Agent Card</text>
+    <rect x="696" y="614" width="166" height="38" rx="19" class="tag"/><text x="779" y="638" text-anchor="middle" class="tagtext">Task + Artifact</text>
+    <text x="700" y="682" text-anchor="middle" class="tiny">A2A 1.0 · HTTP+JSON / JSON-RPC</text>
+
+    <rect x="1010" y="478" width="320" height="112" rx="18" class="store"/>
+    <text x="1170" y="519" text-anchor="middle" class="label">Durable Store</text>
+    <text x="1170" y="550" text-anchor="middle" class="sub">atomic snapshots · event log</text>
+    <text x="1170" y="575" text-anchor="middle" class="tiny">checkpoint · retry · artifact</text>
+
+    <rect x="1010" y="625" width="320" height="112" rx="18" class="store"/>
+    <text x="1170" y="666" text-anchor="middle" class="label">Trace → Eval</text>
+    <text x="1170" y="697" text-anchor="middle" class="sub">failure class · regression set</text>
+    <text x="1170" y="722" text-anchor="middle" class="tiny">success · token · p50/p95</text>
+  </g>
+
+  <path d="M320 196H410" class="flow"/>
+  <path d="M980 196H1065" class="flow"/>
+  <path d="M548 422L300 515" class="flow"/>
+  <path d="M705 422V515" class="flow dash"/>
+  <path d="M871 422L1062 478" class="flow"/>
+  <path d="M900 650H1010" class="flow dash"/>
+  <path d="M1170 590V625" class="flow"/>
+
+  <text x="397" y="477" class="tiny">MCP</text>
+  <text x="721" y="470" class="tiny">A2A</text>
+  <text x="914" y="483" class="tiny">checkpoint</text>
+</svg>
