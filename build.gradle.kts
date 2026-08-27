@@ -19,7 +19,7 @@ repositories {
 
 dependencies {
     // 终端 I/O（TUI 框架的底层驱动）
-    implementation("org.jline:jline:3.28.0")
+    implementation("org.jline:jline:4.3.1")
 
     // Markdown terminal rendering
     implementation("com.github.ajalt.mordant:mordant:3.0.2")
