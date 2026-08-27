@@ -34,7 +34,7 @@ dependencies {
     implementation("com.openai:openai-java:4.37.0")
 
     // Web server (Remote mode)
-    implementation("io.javalin:javalin:6.6.0")
+    implementation("io.javalin:javalin:7.2.3")
 
     // Config & JSON
     implementation("org.yaml:snakeyaml:2.2")
