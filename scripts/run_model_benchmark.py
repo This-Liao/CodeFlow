@@ -52,7 +52,9 @@ def create_fixture(root: Path) -> None:
         path.write_text(content, encoding="utf-8")
 
 
-def write_config(source: Path, target: Path, enabled: bool) -> tuple[str, str]:
+def write_config(
+    source: Path, target: Path, enabled: bool, include_deferred: bool = False
+) -> tuple[str, str]:
     data = yaml.safe_load(source.read_text(encoding="utf-8")) or {}
     providers = data.get("providers") or []
     if not providers:
@@ -75,6 +77,7 @@ def write_config(source: Path, target: Path, enabled: bool) -> tuple[str, str]:
         "hooks": [],
         "context_policy": {
             "enabled": enabled,
+            "include_deferred_tools": include_deferred,
             "max_tool_schemas": 12,
             "max_schema_chars": 16000,
             "max_memory_chars": 6000,
@@ -122,19 +125,31 @@ def run_variant(name: str, config: Path, fixture: Path, jar: Path) -> dict[str, 
             "success": expected in str(result.get("result") or ""),
             "inputTokens": int(usage.get("input_tokens") or 0),
             "outputTokens": int(usage.get("output_tokens") or 0),
+            "cacheReadTokens": int(usage.get("cache_read_tokens") or 0),
+            "cacheCreationTokens": int(usage.get("cache_creation_tokens") or 0),
             "latencyMs": round((time.perf_counter() - started) * 1000),
             "toolCalls": len(result.get("tool_calls") or []),
             "toolErrors": errors,
         }
+        row["promptTokens"] = (
+            row["inputTokens"] + row["cacheReadTokens"] + row["cacheCreationTokens"]
+        )
         rows.append(row)
         print(f"[{name}] {index}/{len(TASKS)} {'PASS' if row['success'] else 'FAIL'}")
     latencies = sorted(row["latencyMs"] for row in rows)
     return {
         "name": name,
         "successRate": round(100 * sum(row["success"] for row in rows) / len(rows), 1),
+        "averagePromptTokens": round(sum(row["promptTokens"] for row in rows) / len(rows)),
         "averageInputTokens": round(sum(row["inputTokens"] for row in rows) / len(rows)),
+        "averageCacheReadTokens": round(
+            sum(row["cacheReadTokens"] for row in rows) / len(rows)
+        ),
+        "totalPromptTokens": sum(row["promptTokens"] for row in rows),
         "totalInputTokens": sum(row["inputTokens"] for row in rows),
         "totalOutputTokens": sum(row["outputTokens"] for row in rows),
+        "totalCacheReadTokens": sum(row["cacheReadTokens"] for row in rows),
+        "totalCacheCreationTokens": sum(row["cacheCreationTokens"] for row in rows),
         "p95LatencyMs": latencies[-1],
         "toolCalls": sum(row["toolCalls"] for row in rows),
         "toolErrors": sum(row["toolErrors"] for row in rows),
@@ -146,10 +161,12 @@ def write_report(report: dict[str, Any], json_path: Path, markdown_path: Path) -
     json_path.parent.mkdir(parents=True, exist_ok=True)
     json_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     rows = [
-        "| {name} | {successRate:.1f}% | {averageInputTokens} | {totalInputTokens} | "
-        "{p95LatencyMs} ms | {toolCalls} | {toolErrors} |".format(**item)
+        "| {name} | {successRate:.1f}% | {averagePromptTokens} | {averageInputTokens} | "
+        "{averageCacheReadTokens} | {totalOutputTokens} | {p95LatencyMs} ms | "
+        "{toolCalls} | {toolErrors} |".format(**item)
         for item in report["variants"]
     ]
+    comparison = report["comparison"]
     markdown_path.write_text(
         f"""# 真实模型 Context Benchmark
 
@@ -157,9 +174,11 @@ def write_report(report: dict[str, Any], json_path: Path, markdown_path: Path) -
 
 模型：{report['model']}；任务：{report['taskCount']} 条；时间：{report['timestampUtc']}
 
-| Variant | Success | Avg Input Tokens | Total Input Tokens | p95 Latency | Tool Calls | Tool Errors |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Variant | Success | Avg Prompt Tokens | Avg Uncached Input | Avg Cache Read | Output Tokens | p95 Latency | Tool Calls | Tool Errors |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 {chr(10).join(rows)}
+
+在本次固定任务集上，Context Policy 将平均完整 Prompt Token 减少 {comparison['promptTokenReductionPct']:.1f}%，p95 延迟减少 {comparison['p95LatencyReductionPct']:.1f}%。
 
 结果受模型版本与采样影响，作为 Semantic Layer 证据，不替代 CI 确定性门禁。
 """, encoding="utf-8")
@@ -183,16 +202,27 @@ def main() -> int:
     try:
         full = work / "full.yaml"
         context = work / "context.yaml"
-        provider, model = write_config(source, full, False)
+        provider, model = write_config(source, full, False, include_deferred=True)
         write_config(source, context, True)
         variants = [
             run_variant("full-tool-context", full, fixture, jar),
             run_variant("stage-aware-context", context, fixture, jar),
         ]
+        full_result, context_result = variants
+        comparison = {
+            "promptTokenReductionPct": round(
+                100 * (1 - context_result["averagePromptTokens"]
+                       / full_result["averagePromptTokens"]), 1
+            ),
+            "p95LatencyReductionPct": round(
+                100 * (1 - context_result["p95LatencyMs"]
+                       / full_result["p95LatencyMs"]), 1
+            ),
+        }
         report = {
             "timestampUtc": datetime.now(UTC).replace(microsecond=0).isoformat(),
             "result": "PASS", "provider": provider, "model": model,
-            "taskCount": len(TASKS), "variants": variants,
+            "taskCount": len(TASKS), "variants": variants, "comparison": comparison,
         }
         write_report(report, args.json, args.markdown)
         print(f"Model benchmark: {args.markdown.relative_to(ROOT)}")

@@ -1,0 +1,135 @@
+{
+  "timestampUtc": "2026-08-27T08:37:00+00:00",
+  "result": "PASS",
+  "provider": "deepseek",
+  "model": "deepseek-v4-flash",
+  "taskCount": 4,
+  "variants": [
+    {
+      "name": "full-tool-context",
+      "successRate": 100.0,
+      "averagePromptTokens": 7020,
+      "averageInputTokens": 108,
+      "averageCacheReadTokens": 6912,
+      "totalPromptTokens": 28082,
+      "totalInputTokens": 434,
+      "totalOutputTokens": 143,
+      "totalCacheReadTokens": 27648,
+      "totalCacheCreationTokens": 0,
+      "p95LatencyMs": 26062,
+      "toolCalls": 7,
+      "toolErrors": 0,
+      "tasks": [
+        {
+          "success": true,
+          "inputTokens": 160,
+          "outputTokens": 35,
+          "cacheReadTokens": 6784,
+          "cacheCreationTokens": 0,
+          "latencyMs": 4103,
+          "toolCalls": 2,
+          "toolErrors": 0,
+          "promptTokens": 6944
+        },
+        {
+          "success": true,
+          "inputTokens": 96,
+          "outputTokens": 15,
+          "cacheReadTokens": 7040,
+          "cacheCreationTokens": 0,
+          "latencyMs": 4342,
+          "toolCalls": 2,
+          "toolErrors": 0,
+          "promptTokens": 7136
+        },
+        {
+          "success": true,
+          "inputTokens": 82,
+          "outputTokens": 64,
+          "cacheReadTokens": 7040,
+          "cacheCreationTokens": 0,
+          "latencyMs": 5961,
+          "toolCalls": 2,
+          "toolErrors": 0,
+          "promptTokens": 7122
+        },
+        {
+          "success": true,
+          "inputTokens": 96,
+          "outputTokens": 29,
+          "cacheReadTokens": 6784,
+          "cacheCreationTokens": 0,
+          "latencyMs": 26062,
+          "toolCalls": 1,
+          "toolErrors": 0,
+          "promptTokens": 6880
+        }
+      ]
+    },
+    {
+      "name": "stage-aware-context",
+      "successRate": 100.0,
+      "averagePromptTokens": 5981,
+      "averageInputTokens": 2941,
+      "averageCacheReadTokens": 3040,
+      "totalPromptTokens": 23924,
+      "totalInputTokens": 11764,
+      "totalOutputTokens": 100,
+      "totalCacheReadTokens": 12160,
+      "totalCacheCreationTokens": 0,
+      "p95LatencyMs": 8875,
+      "toolCalls": 6,
+      "toolErrors": 0,
+      "tasks": [
+        {
+          "success": true,
+          "inputTokens": 364,
+          "outputTokens": 14,
+          "cacheReadTokens": 5504,
+          "cacheCreationTokens": 0,
+          "latencyMs": 8317,
+          "toolCalls": 2,
+          "toolErrors": 0,
+          "promptTokens": 5868
+        },
+        {
+          "success": true,
+          "inputTokens": 4483,
+          "outputTokens": 12,
+          "cacheReadTokens": 2176,
+          "cacheCreationTokens": 0,
+          "latencyMs": 8875,
+          "toolCalls": 1,
+          "toolErrors": 0,
+          "promptTokens": 6659
+        },
+        {
+          "success": true,
+          "inputTokens": 3441,
+          "outputTokens": 24,
+          "cacheReadTokens": 2304,
+          "cacheCreationTokens": 0,
+          "latencyMs": 5613,
+          "toolCalls": 2,
+          "toolErrors": 0,
+          "promptTokens": 5745
+        },
+        {
+          "success": true,
+          "inputTokens": 3476,
+          "outputTokens": 50,
+          "cacheReadTokens": 2176,
+          "cacheCreationTokens": 0,
+          "latencyMs": 5209,
+          "toolCalls": 1,
+          "toolErrors": 0,
+          "promptTokens": 5652
+        }
+      ]
+    }
+  ],
+  "comparison": {
+    "promptTokenReductionPct": 14.8,
+    "p95LatencyReductionPct": 65.9
+  }
+}

@@ -23,7 +23,12 @@ public sealed interface AgentEvent {
 
     record LoopComplete(int totalTurns) implements AgentEvent {}
 
-    record UsageEvent(int inputTokens, int outputTokens) implements AgentEvent {}
+    record UsageEvent(int inputTokens, int outputTokens,
+                      int cacheReadTokens, int cacheCreationTokens) implements AgentEvent {
+        public UsageEvent(int inputTokens, int outputTokens) {
+            this(inputTokens, outputTokens, 0, 0);
+        }
+    }
 
     record ErrorEvent(String message) implements AgentEvent {}
 

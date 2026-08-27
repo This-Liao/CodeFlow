@@ -139,6 +139,7 @@ public class Agent {
         conv.injectLongTermMemory(instructions, activeMemory);
 
         int totalInput = 0, totalOutput = 0;
+        int totalCacheRead = 0, totalCacheCreation = 0;
         int outputRecoveries = 0;
         boolean maxTokensEscalated = false;
 
@@ -323,7 +324,10 @@ public class Agent {
 
             totalInput += turnInput;
             totalOutput += turnOutput;
-            putSafe(queue, new AgentEvent.UsageEvent(totalInput, totalOutput));
+            totalCacheRead += turnCacheRead;
+            totalCacheCreation += turnCacheCreation;
+            putSafe(queue, new AgentEvent.UsageEvent(
+                    totalInput, totalOutput, totalCacheRead, totalCacheCreation));
 
             // Max tokens handling
             if ("max_tokens".equals(stopReason)) {

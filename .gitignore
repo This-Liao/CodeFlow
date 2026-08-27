@@ -10,6 +10,7 @@ CLAUDE.md
 config.yaml
 config.local.yaml
 *.local.yaml
+docs/assets/codeflow-validation.gif
 
 # Runtime traces, durable checkpoints and evaluation reports
 .codeflow/

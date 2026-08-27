@@ -3,12 +3,17 @@ package com.codeflow.config;
 /** Token and schema budgets for stage-aware context assembly. */
 public class ContextPolicyConfig {
     private boolean enabled = true;
+    private boolean includeDeferredTools;
     private int maxToolSchemas = 24;
     private int maxSchemaChars = 30_000;
     private int maxMemoryChars = 12_000;
 
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
+    public boolean isIncludeDeferredTools() { return includeDeferredTools; }
+    public void setIncludeDeferredTools(boolean includeDeferredTools) {
+        this.includeDeferredTools = includeDeferredTools;
+    }
     public int getMaxToolSchemas() { return maxToolSchemas; }
     public void setMaxToolSchemas(int maxToolSchemas) { this.maxToolSchemas = maxToolSchemas; }
     public int getMaxSchemaChars() { return maxSchemaChars; }

@@ -59,6 +59,33 @@ class ContextPolicyTest {
     }
 
     @Test
+    void canIncludeDeferredToolsForAblation() {
+        var config = new ContextPolicyConfig();
+        config.setEnabled(false);
+        config.setIncludeDeferredTools(true);
+        var registry = new ToolRegistry();
+        registry.register(new Tool() {
+            public String name() { return "RemoteAgent"; }
+            public String description() { return "deferred remote agent"; }
+            public ToolCategory category() { return ToolCategory.READ; }
+            public boolean shouldDefer() { return true; }
+            public Map<String, Object> schema() {
+                return Map.of("name", name(), "description", description(),
+                        "input_schema", Map.of("type", "object", "properties", Map.of()));
+            }
+            public ToolResult execute(Map<String, Object> args) { return ToolResult.success("ok"); }
+        });
+        var conversation = new ConversationManager();
+        conversation.addUserMessage("compare full tool context");
+
+        new ContextPolicy(config).apply(registry, "anthropic", conversation);
+
+        assertTrue(registry.isDiscovered("RemoteAgent"));
+        assertTrue(registry.getAllSchemas("anthropic").stream()
+                .anyMatch(schema -> "RemoteAgent".equals(schema.get("name"))));
+    }
+
+    @Test
     void selectsRelevantMemoryWithinBudget() {
         var config = new ContextPolicyConfig();
         config.setMaxMemoryChars(1_000);

@@ -72,4 +72,4 @@ jobs:
             docs/validation/latest.json
             docs/BENCHMARK.md
             docs/benchmarks/context-ablation.json
-            docs/assets/codeflow-demo.gif
+            docs/assets/codeflow-validation.gif

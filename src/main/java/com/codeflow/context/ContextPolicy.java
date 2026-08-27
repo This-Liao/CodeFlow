@@ -29,6 +29,9 @@ public final class ContextPolicy {
     }
 
     public Selection apply(ToolRegistry registry, String protocol, ConversationManager conversation) {
+        if (config.isIncludeDeferredTools()) {
+            registry.listTools().forEach(tool -> registry.markDiscovered(tool.name()));
+        }
         if (!config.isEnabled()) {
             registry.setContextOmittedTools(Set.of());
             return new Selection(inferStage(conversation), List.of(), registry.getAllSchemas(protocol).size(), 0);

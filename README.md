@@ -20,7 +20,7 @@ CodeFlow 是一个面向仓库级研发任务的 Java 21 Agent Runtime。它将 
 
 ![CodeFlow 工作流演示](docs/assets/codeflow-demo.gif)
 
-> 这是一次真实端到端运行的终端录屏：脚本执行 Gradle 测试、Java → Python/LangGraph A2A 调用、外部强制终止 JVM 后的新进程恢复，以及 Context 消融基准。画面来自实际进程输出，不包含预设任务结果。
+> 真实模型修复代码并运行测试：[录制证据](docs/demo/product-demo.json) · [工程验证](docs/VALIDATION.md)
 
 ## 为什么选择 CodeFlow
 
@@ -132,10 +132,11 @@ python -m venv .codeflow\demo-venv
 
 | 证据 | 结果 |
 |---|---:|
-| JUnit | 201 项，0 失败 |
+| JUnit | 202 项，0 失败 |
 | Java → Python A2A | 扫描 193 个 Java 文件，返回 1 个 Artifact |
 | 强制崩溃恢复 | `EXECUTING → COMPLETED`，重复 Tool Call 为 0 |
 | Context Policy | 24/24 任务成功，阶段识别 100%，Tool Schema 减少 75.7%，ToolSearch 错误为 0 |
+| 真实模型对照 | `deepseek-v4-flash` 两组均 4/4 成功；Prompt Token 减少 14.8%，p95 延迟减少 65.9% |
 
 ## 跨语言 A2A 演示
 
@@ -247,7 +248,7 @@ python -m pip install -e "examples/a2a-static-analysis-agent[benchmark]"
 python scripts/run_model_benchmark.py --config /path/to/config.yaml
 ```
 
-真实模型结果受模型版本与采样影响，因此作为可选 Semantic Layer，不作为默认 CI 门禁。
+最新一次 [`deepseek-v4-flash` 实测报告](docs/MODEL_BENCHMARK.md)中，两组均为 4/4 成功且工具错误为 0；Context Policy 将平均完整 Prompt Token 从 7020 降至 5981（减少 14.8%），p95 延迟从 26.1 秒降至 8.9 秒（减少 65.9%）。该结果只有 4 条固定任务，受模型版本、缓存与采样影响，因此作为 Semantic Layer 证据，不作为默认 CI 门禁。
 
 ## 开发
 

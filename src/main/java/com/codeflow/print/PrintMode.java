@@ -313,6 +313,8 @@ public class PrintMode {
         var resultText = new StringBuilder();
         int totalInputTokens = 0;
         int totalOutputTokens = 0;
+        int totalCacheReadTokens = 0;
+        int totalCacheCreationTokens = 0;
         int totalTurns = 0;
         var toolCalls = new ArrayList<Map<String, Object>>();
         final String activeDurableTaskId = durableTask == null ? null : durableTask.getId();
@@ -391,11 +393,15 @@ public class PrintMode {
                 case AgentEvent.UsageEvent e -> {
                     totalInputTokens = e.inputTokens();
                     totalOutputTokens = e.outputTokens();
+                    totalCacheReadTokens = e.cacheReadTokens();
+                    totalCacheCreationTokens = e.cacheCreationTokens();
                     if (format == OutputFormat.STREAM_JSON) {
                         var obj = new LinkedHashMap<String, Object>();
                         obj.put("type", "usage");
                         obj.put("input_tokens", e.inputTokens());
                         obj.put("output_tokens", e.outputTokens());
+                        obj.put("cache_read_tokens", e.cacheReadTokens());
+                        obj.put("cache_creation_tokens", e.cacheCreationTokens());
                         printJson(obj);
                     }
                 }
@@ -439,7 +445,9 @@ public class PrintMode {
                         obj.put("tool_calls", toolCalls);
                         obj.put("usage", Map.of(
                                 "input_tokens", totalInputTokens,
-                                "output_tokens", totalOutputTokens
+                                "output_tokens", totalOutputTokens,
+                                "cache_read_tokens", totalCacheReadTokens,
+                                "cache_creation_tokens", totalCacheCreationTokens
                         ));
                         printJson(obj);
                     }

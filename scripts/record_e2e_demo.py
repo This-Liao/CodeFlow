@@ -33,7 +33,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = ROOT / "examples" / "a2a-static-analysis-agent"
-DEFAULT_GIF = ROOT / "docs" / "assets" / "codeflow-demo.gif"
+DEFAULT_GIF = ROOT / "docs" / "assets" / "codeflow-validation.gif"
 DEFAULT_JSON = ROOT / "docs" / "validation" / "latest.json"
 DEFAULT_MARKDOWN = ROOT / "docs" / "VALIDATION.md"
 DEFAULT_BENCHMARK_JSON = ROOT / "docs" / "benchmarks" / "context-ablation.json"
@@ -295,7 +295,13 @@ def wrap_terminal(lines: list[str], width: int = 104) -> list[str]:
     return wrapped
 
 
-def render_terminal_gif(lines: list[str], output: Path) -> None:
+def render_terminal_gif(
+    lines: list[str],
+    output: Path,
+    *,
+    title: str = "CodeFlow — real end-to-end validation",
+    footer: str = "Captured from real Gradle, Java and Python processes • report: docs/VALIDATION.md",
+) -> None:
     """Render captured real terminal output as a compact GitHub-friendly recording."""
     width, height = 1280, 720
     header_height, footer_height = 54, 42
@@ -316,7 +322,7 @@ def render_terminal_gif(lines: list[str], output: Path) -> None:
         draw.rectangle((9, 35, width - 9, header_height), fill="#182235")
         for x, color in ((30, "#ff5f57"), (54, "#febc2e"), (78, "#28c840")):
             draw.ellipse((x - 7, 24 - 7, x + 7, 24 + 7), fill=color)
-        draw.text((102, 16), "CodeFlow — real end-to-end validation", font=title_font, fill="#dbeafe")
+        draw.text((102, 16), title, font=title_font, fill="#dbeafe")
 
         visible = recorded[max(0, count - max_rows) : count]
         for row, line in enumerate(visible):
@@ -340,7 +346,7 @@ def render_terminal_gif(lines: list[str], output: Path) -> None:
         draw.line((24, height - footer_height, width - 24, height - footer_height), fill="#26364e", width=1)
         draw.text(
             (28, height - 31),
-            "Captured from real Gradle, Java and Python processes • report: docs/VALIDATION.md",
+            footer,
             font=load_font(15),
             fill="#7f91aa",
         )

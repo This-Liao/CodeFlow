@@ -826,7 +826,9 @@ public class RemoteServer {
                 case AgentEvent.UsageEvent e -> {
                     broadcast(Map.of("type", "usage", "data", Map.of(
                             "inputTokens", e.inputTokens(),
-                            "outputTokens", e.outputTokens()
+                            "outputTokens", e.outputTokens(),
+                            "cacheReadTokens", e.cacheReadTokens(),
+                            "cacheCreationTokens", e.cacheCreationTokens()
                     )));
                 }
                 case AgentEvent.ErrorEvent e -> {
