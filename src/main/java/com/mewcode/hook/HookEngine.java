@@ -548,7 +548,7 @@ public class HookEngine {
     }
 
     /**
-     * 执行 command 类型 action —— 通过 bash -c 运行命令。
+     * 执行 command 类型 action —— Windows 使用 cmd.exe，其他平台使用 bash。
      * 注入 MEWCODE_EVENT、MEWCODE_TOOL、MEWCODE_FILE_PATH 环境变量。
      * 支持超时保护，超时后强制终止子进程。
      */
@@ -561,7 +561,9 @@ public class HookEngine {
         String command = ctx.expand(h.action().command());
 
         try {
-            ProcessBuilder pb = new ProcessBuilder("bash", "-c", command);
+            ProcessBuilder pb = isWindows()
+                    ? new ProcessBuilder("cmd.exe", "/d", "/s", "/c", command)
+                    : new ProcessBuilder("bash", "-c", command);
             Map<String, String> env = pb.environment();
             // 注入环境变量
             env.put("MEWCODE_EVENT", ctx.event() != null ? ctx.event().value() : "");
@@ -598,6 +600,10 @@ public class HookEngine {
             return new HookResult(h.id(),
                     "Failed to execute hook: " + e.getMessage(), false, h.reject());
         }
+    }
+
+    private static boolean isWindows() {
+        return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
     }
 
     /**

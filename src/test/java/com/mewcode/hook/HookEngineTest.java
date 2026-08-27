@@ -193,9 +193,12 @@ class HookEngineTest {
     @Test
     void testRunCommandTimeout() {
         var engine = new HookEngine();
+        String slowCommand = System.getProperty("os.name", "").toLowerCase().contains("win")
+                ? "ping -n 6 127.0.0.1 >NUL"
+                : "sleep 5";
         engine.loadHooks(List.of(new Hook(
                 "slow", EventName.POST_TOOL_USE, null,
-                new Action(ActionType.COMMAND, "sleep 5", null, null, null, null, null,
+                new Action(ActionType.COMMAND, slowCommand, null, null, null, null, null,
                         Duration.ofMillis(200)),
                 false)));
 
