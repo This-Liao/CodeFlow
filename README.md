@@ -14,23 +14,23 @@
 
 CodeFlow 是一个面向仓库级研发任务的 Java 21 Agent Runtime。它将 ReAct 循环、本地多 Agent 与 Worktree 隔离、MCP 工具、A2A 跨语言委派、可恢复长程执行、上下文预算和基于 Trace 的回归评测整合在同一个工程化平台中。
 
-[架构](#架构) · [快速开始](#快速开始) · [A2A 演示](#跨语言-a2a-演示) · [评测](#eval-驱动开发) · [开发指南](#开发)
+[架构](#架构) · [快速开始](#快速开始) · [工程验证](#工程验证) · [A2A 演示](#跨语言-a2a-演示) · [评测](#eval-驱动开发) · [开发指南](#开发)
 
 </div>
 
 ![CodeFlow 工作流演示](docs/assets/codeflow-demo.gif)
 
-> 动图由 [`scripts/generate_demo_gif.py`](scripts/generate_demo_gif.py) 生成，展示了仓库中真实实现的任务生命周期和协议流程。
+> 动图由 [`scripts/record_e2e_demo.py`](scripts/record_e2e_demo.py) 在真实执行 Gradle、Java Host 和 Python/LangGraph Agent 时录制。画面来自实际进程输出，不包含预设任务结果。
 
 ## 为什么选择 CodeFlow
 
 很多 Agent Demo 停留在单轮提示词，或者把所有协作者绑定到同一个框架。CodeFlow 面向真正持续数小时的研发任务，重点解决以下基础设施问题：
 
-- **跨框架协作：**通过 A2A 1.0 Agent Card 发现远程 Agent，而不是依赖框架私有 REST 接口。
-- **可恢复执行：**持久化任务状态、Checkpoint、事件和 Artifact，使中断任务能够从最近的安全阶段继续。
-- **评测闭环：**将真实运行 Trace 自动转化为失败分类和去重后的回归用例。
-- **上下文工程：**根据任务阶段、相关度和显式预算动态选择工具与长期记忆。
-- **安全隔离：**通过 Worktree、权限检查、操作系统沙箱和可审计工具调用隔离本地子 Agent。
+- **跨框架协作：** 通过 A2A 1.0 Agent Card 发现远程 Agent，而不是依赖框架私有 REST 接口。
+- **可恢复执行：** 持久化任务状态、Checkpoint、事件和 Artifact，使中断任务能够从最近的安全阶段继续。
+- **评测闭环：** 将真实运行 Trace 自动转化为失败分类和去重后的回归用例。
+- **上下文工程：** 根据任务阶段、相关度和显式预算动态选择工具与长期记忆。
+- **安全隔离：** 通过 Worktree、权限检查、操作系统沙箱和可审计工具调用隔离本地子 Agent。
 
 ## 架构
 
@@ -105,6 +105,28 @@ java -jar build/libs/codeflow.jar --resume-task cf-...
 ```
 
 任务运行状态保存在 `.codeflow/`，会话历史和 Compact 边界保存在 `.mewcode/`；两者都不会提交到 Git。
+
+## 工程验证
+
+仓库提供可重复执行的端到端验证：Gradle 清理构建与完整测试 → 启动真实 Python/LangGraph A2A Agent → Java Host 发现 Agent Card → 创建 A2A Task → 获取静态分析 Artifact → 生成验证报告与终端录屏 GIF。
+
+Linux/macOS：
+
+```bash
+python -m venv .codeflow/demo-venv
+.codeflow/demo-venv/bin/pip install -e "examples/a2a-static-analysis-agent[recording]"
+.codeflow/demo-venv/bin/python scripts/record_e2e_demo.py
+```
+
+Windows PowerShell：
+
+```powershell
+python -m venv .codeflow\demo-venv
+.\.codeflow\demo-venv\Scripts\pip.exe install -e "examples\a2a-static-analysis-agent[recording]"
+.\.codeflow\demo-venv\Scripts\python.exe scripts\record_e2e_demo.py
+```
+
+最近一次实测环境、测试总数、A2A 状态、Artifact 数量与耗时见 [`docs/VALIDATION.md`](docs/VALIDATION.md)。机器可读结果保存在 [`docs/validation/latest.json`](docs/validation/latest.json)。
 
 ## 跨语言 A2A 演示
 

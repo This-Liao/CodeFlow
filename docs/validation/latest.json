@@ -1,0 +1,31 @@
+{
+  "timestampUtc": "2026-08-27T06:27:29+00:00",
+  "result": "PASS",
+  "gradle": {
+    "result": "PASS",
+    "tests": {
+      "tests": 200,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 2,
+      "passed": 198
+    },
+    "jarBytes": 86879591
+  },
+  "a2a": {
+    "agent": "CodeFlow Python Static Analysis Agent",
+    "protocolVersion": "1.0",
+    "protocolBinding": "HTTP+JSON",
+    "taskId": "aa57c18b-335e-4325-b211-b6eabe23014d",
+    "state": "TASK_STATE_COMPLETED",
+    "artifacts": 1,
+    "scannedJavaFiles": 191,
+    "findings": 47,
+    "durationMs": 311
+  },
+  "environment": {
+    "os": "Windows 11 (AMD64)",
+    "python": "3.12.13",
+    "java": "java version \"22.0.2\" 2024-07-16"
+  }
+}

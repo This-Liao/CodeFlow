@@ -41,3 +41,33 @@ jobs:
         with:
           name: test-report-${{ matrix.os }}
           path: build/reports/tests/test
+
+  a2a-e2e:
+    name: Java → Python A2A E2E
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: examples/a2a-static-analysis-agent/pyproject.toml
+      - uses: gradle/actions/setup-gradle@v5
+      - name: Install Python Agent and recorder
+        run: python -m pip install -e "examples/a2a-static-analysis-agent[recording]"
+      - name: Run real Java-to-Python validation
+        run: python scripts/record_e2e_demo.py
+      - name: Upload validation evidence
+        uses: actions/upload-artifact@v6
+        with:
+          name: a2a-e2e-evidence
+          path: |
+            docs/VALIDATION.md
+            docs/validation/latest.json
+            docs/assets/codeflow-demo.gif
