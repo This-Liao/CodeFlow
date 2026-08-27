@@ -42,8 +42,8 @@ jobs:
           name: test-report-${{ matrix.os }}
           path: build/reports/tests/test
 
-  a2a-e2e:
-    name: Java → Python A2A E2E
+  agent-harness-e2e:
+    name: A2A + Durable + Context E2E
     needs: test
     runs-on: ubuntu-latest
     steps:
@@ -61,13 +61,15 @@ jobs:
       - uses: gradle/actions/setup-gradle@v5
       - name: Install Python Agent and recorder
         run: python -m pip install -e "examples/a2a-static-analysis-agent[recording]"
-      - name: Run real Java-to-Python validation
+      - name: Run Agent Harness end-to-end validation
         run: python scripts/record_e2e_demo.py
       - name: Upload validation evidence
         uses: actions/upload-artifact@v6
         with:
-          name: a2a-e2e-evidence
+          name: agent-harness-e2e-evidence
           path: |
             docs/VALIDATION.md
             docs/validation/latest.json
+            docs/BENCHMARK.md
+            docs/benchmarks/context-ablation.json
             docs/assets/codeflow-demo.gif

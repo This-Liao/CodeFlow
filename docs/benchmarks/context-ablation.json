@@ -1,0 +1,47 @@
+{
+  "result": "PASS",
+  "taskCount": 24,
+  "toolCatalogSize": 46,
+  "contextPolicyMaxSchemas": 12,
+  "variants": [
+    {
+      "name": "full-tool-injection",
+      "successRate": 100.0,
+      "stageAccuracy": 100.0,
+      "initialToolRecall": 100.0,
+      "averageInitialToolSchemas": 46.0,
+      "averageSchemaChars": 53366.0,
+      "estimatedInputTokens": 13342,
+      "schemaReductionPct": 0.0,
+      "toolSearchCalls": 0,
+      "toolErrors": 0,
+      "p95SelectionMicros": 375
+    },
+    {
+      "name": "deferred-tool",
+      "successRate": 100.0,
+      "stageAccuracy": 100.0,
+      "initialToolRecall": 87.2,
+      "averageInitialToolSchemas": 17.0,
+      "averageSchemaChars": 18604.0,
+      "estimatedInputTokens": 4651,
+      "schemaReductionPct": 65.1,
+      "toolSearchCalls": 5,
+      "toolErrors": 0,
+      "p95SelectionMicros": 121
+    },
+    {
+      "name": "context-policy",
+      "successRate": 100.0,
+      "stageAccuracy": 100.0,
+      "initialToolRecall": 84.6,
+      "averageInitialToolSchemas": 12.0,
+      "averageSchemaChars": 12991.6,
+      "estimatedInputTokens": 3248,
+      "schemaReductionPct": 75.7,
+      "toolSearchCalls": 6,
+      "toolErrors": 0,
+      "p95SelectionMicros": 759
+    }
+  ]
+}

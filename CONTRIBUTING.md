@@ -7,7 +7,7 @@ Thanks for helping improve CodeFlow.
 1. Install JDK 21 or newer.
 2. Fork the repository and create a focused branch.
 3. Run `./gradlew test` before opening a pull request.
-4. Never commit `.mewcode/config.yaml`, `.codeflow/`, API keys, session transcripts, or repository data used by an agent.
+4. Never commit `.codeflow/config.yaml`, `.codeflow/`, API keys, session transcripts, or repository data used by an agent.
 
 ## Pull requests
 

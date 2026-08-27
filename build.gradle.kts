@@ -10,7 +10,7 @@ java {
 }
 
 application {
-    mainClass = "com.mewcode.MewCode"
+    mainClass = "com.codeflow.CodeFlow"
 }
 
 repositories {

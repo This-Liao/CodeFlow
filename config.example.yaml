@@ -1,4 +1,4 @@
-# Copy this file to .mewcode/config.yaml. Keep real credentials in environment variables.
+# Copy this file to .codeflow/config.yaml. Keep real credentials in environment variables.
 providers:
   - name: deepseek
     protocol: openai-compat
