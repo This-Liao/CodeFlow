@@ -4,7 +4,7 @@
 
 # CodeFlow
 
-**Long-Horizon Agent Harness · A2A Interoperability · Eval-Driven Development**
+**长程 Agent Harness · A2A 跨语言协作 · Eval 驱动开发**
 
 [![CI](https://github.com/This-Liao/CodeFlow/actions/workflows/ci.yml/badge.svg)](https://github.com/This-Liao/CodeFlow/actions/workflows/ci.yml)
 [![Java 21](https://img.shields.io/badge/Java-21-ED8B00?logo=openjdk&logoColor=white)](https://openjdk.org/projects/jdk/21/)
@@ -12,29 +12,29 @@
 [![MCP](https://img.shields.io/badge/MCP-1.1-7C3AED)](https://modelcontextprotocol.io/)
 [![License](https://img.shields.io/badge/License-Apache--2.0-green.svg)](LICENSE)
 
-CodeFlow is a Java 21 agent runtime for repository-scale engineering tasks. It combines a ReAct loop, local multi-agent/worktree isolation, MCP tools, cross-language A2A delegation, crash-safe durable execution, context budgeting, and trace-based regression evaluation.
+CodeFlow 是一个面向仓库级研发任务的 Java 21 Agent Runtime。它将 ReAct 循环、本地多 Agent 与 Worktree 隔离、MCP 工具、A2A 跨语言委派、可恢复长程执行、上下文预算和基于 Trace 的回归评测整合在同一个工程化平台中。
 
-[Architecture](#architecture) · [Quick start](#quick-start) · [A2A demo](#cross-language-a2a-demo) · [Evaluation](#eval-driven-development) · [中文说明](#中文概览)
+[架构](#架构) · [快速开始](#快速开始) · [A2A 演示](#跨语言-a2a-演示) · [评测](#eval-驱动开发) · [开发指南](#开发)
 
 </div>
 
-![CodeFlow workflow demo](docs/assets/codeflow-demo.gif)
+![CodeFlow 工作流演示](docs/assets/codeflow-demo.gif)
 
-> The animation is generated from [`scripts/generate_demo_gif.py`](scripts/generate_demo_gif.py) and illustrates the real lifecycle and protocol flow implemented in this repository.
+> 动图由 [`scripts/generate_demo_gif.py`](scripts/generate_demo_gif.py) 生成，展示了仓库中真实实现的任务生命周期和协议流程。
 
-## Why CodeFlow
+## 为什么选择 CodeFlow
 
-Most agent demos stop after one prompt or couple every collaborator to one framework. CodeFlow focuses on infrastructure that becomes necessary when an engineering task lasts for hours:
+很多 Agent Demo 停留在单轮提示词，或者把所有协作者绑定到同一个框架。CodeFlow 面向真正持续数小时的研发任务，重点解决以下基础设施问题：
 
-- **Interoperability:** discover remote agents through an A2A 1.0 Agent Card instead of framework-specific REST contracts.
-- **Durability:** persist state, checkpoints, events, and artifacts so an interrupted task resumes from its last safe stage.
-- **Evaluation:** turn production traces into classified failures and deduplicated regression cases.
-- **Context engineering:** choose tools and memories using the current task stage, relevance, and explicit budgets.
-- **Isolation:** run local sub-agents in worktrees with permission checks, OS sandboxing, and auditable tool calls.
+- **跨框架协作：**通过 A2A 1.0 Agent Card 发现远程 Agent，而不是依赖框架私有 REST 接口。
+- **可恢复执行：**持久化任务状态、Checkpoint、事件和 Artifact，使中断任务能够从最近的安全阶段继续。
+- **评测闭环：**将真实运行 Trace 自动转化为失败分类和去重后的回归用例。
+- **上下文工程：**根据任务阶段、相关度和显式预算动态选择工具与长期记忆。
+- **安全隔离：**通过 Worktree、权限检查、操作系统沙箱和可审计工具调用隔离本地子 Agent。
 
-## Architecture
+## 架构
 
-![CodeFlow architecture](docs/assets/architecture.svg)
+![CodeFlow 架构](docs/assets/architecture.svg)
 
 ```mermaid
 stateDiagram-v2
@@ -44,34 +44,34 @@ stateDiagram-v2
     EXECUTING --> VERIFYING
     EXECUTING --> WAITING_APPROVAL
     EXECUTING --> FAILED_RETRYABLE
-    VERIFYING --> EXECUTING: fix and retry
+    VERIFYING --> EXECUTING: 修复并重试
     VERIFYING --> COMPLETED
-    FAILED_RETRYABLE --> EXECUTING: retry budget available
-    WAITING_APPROVAL --> EXECUTING: approved
+    FAILED_RETRYABLE --> EXECUTING: 仍有重试预算
+    WAITING_APPROVAL --> EXECUTING: 用户批准
     PLANNING --> PAUSED
     EXECUTING --> PAUSED
-    PAUSED --> EXECUTING: resume
-    FAILED_RETRYABLE --> FAILED: budget exhausted
+    PAUSED --> EXECUTING: 恢复
+    FAILED_RETRYABLE --> FAILED: 重试预算耗尽
     COMPLETED --> [*]
     FAILED --> [*]
 ```
 
-### Core modules
+### 核心模块
 
-| Module | What it does |
+| 模块 | 能力 |
 |---|---|
-| Agent harness | Streaming ReAct loop, parallel read tools, sequential mutations, hooks, permissions, retries |
-| Local multi-agent | Background sub-agents, teams, mailbox/task board, coordinator mode, Git worktrees |
-| A2A host | A2A 1.0 Agent Card discovery, HTTP+JSON and JSON-RPC, Task polling, Artifact normalization |
-| Durable execution | Atomic task snapshots, append-only event log, optimistic version checks, pause/resume/retry |
-| Context policy | Stage inference, Tool Schema budget, deferred discovery, relevance-based memory selection |
-| Eval loop | Trace capture, eight failure classes, regression JSONL, success/token/latency/tool-error reports |
-| Context continuity | Tool-result spill, automatic compaction, recovery attachments, sessions and long-term memory |
-| Safety | Permission modes, pre/post hooks, Linux/macOS sandboxes, response limits, untrusted A2A boundaries |
+| Agent Harness | 流式 ReAct 循环、并行只读工具、串行变更、Hooks、权限与重试 |
+| 本地多 Agent | 后台子 Agent、Teams、Mailbox、任务看板、Coordinator 与 Git Worktree |
+| A2A Host | A2A 1.0 Agent Card、HTTP+JSON、JSON-RPC、Task 轮询和 Artifact 归一化 |
+| Durable Execution | 原子任务快照、追加式事件日志、乐观版本控制、暂停、恢复与重试 |
+| Context Policy | 阶段识别、Tool Schema 预算、Deferred Tool 发现和相关 Memory 选择 |
+| Eval Loop | Trace 捕获、八类失败分类、Regression JSONL、成功率、Token、延迟和工具错误报告 |
+| 上下文连续性 | Tool Result Spill、自动 Compact、Recovery Attachment、Session 和长期 Memory |
+| 安全机制 | 权限模式、前后置 Hook、系统沙箱、响应大小限制和不可信 A2A 数据边界 |
 
-## Quick start
+## 快速开始
 
-Requirements: JDK 21+ (the build can run on a newer JDK while targeting Java 21).
+环境要求：JDK 21+。可以使用更高版本 JDK 构建，但生成的字节码目标版本仍为 Java 21。
 
 ```bash
 git clone https://github.com/This-Liao/CodeFlow.git
@@ -79,14 +79,14 @@ cd CodeFlow
 mkdir -p .mewcode
 cp config.example.yaml .mewcode/config.yaml
 
-# Choose the environment variable expected by your configured protocol.
+# 按配置的协议设置对应环境变量。
 export OPENAI_API_KEY="..."
 
 ./gradlew shadowJar
 java -jar build/libs/codeflow.jar
 ```
 
-Windows PowerShell:
+Windows PowerShell：
 
 ```powershell
 New-Item -ItemType Directory -Force .mewcode | Out-Null
@@ -96,26 +96,26 @@ $env:OPENAI_API_KEY = "..."
 java -jar build\libs\codeflow.jar
 ```
 
-Run a resumable non-interactive task:
+运行可恢复的非交互任务：
 
 ```bash
-java -jar build/libs/codeflow.jar --durable -p "Analyze this repository, fix the bug, and run the tests"
-# stderr prints: Durable task: cf-...
+java -jar build/libs/codeflow.jar --durable -p "分析当前仓库，修复问题并运行测试"
+# stderr 会输出：Durable task: cf-...
 java -jar build/libs/codeflow.jar --resume-task cf-...
 ```
 
-Runtime state is stored under `.codeflow/`; conversation history and compaction boundaries remain under `.mewcode/`. Both are excluded from Git.
+任务运行状态保存在 `.codeflow/`，会话历史和 Compact 边界保存在 `.mewcode/`；两者都不会提交到 Git。
 
-## Cross-language A2A demo
+## 跨语言 A2A 演示
 
-The Java host does not call a custom Python endpoint. It follows the A2A protocol:
+Java Host 不直接调用 Python 的私有接口，而是遵循 A2A 协议：
 
-1. `GET /.well-known/agent-card.json` and select a compatible A2A 1.x interface.
-2. `POST /message:send` with a typed Message and text Part.
-3. Poll `GET /tasks/{id}` across submitted/working/interrupted/terminal states.
-4. Normalize Markdown and structured JSON Artifacts into the parent agent result.
+1. 请求 `GET /.well-known/agent-card.json`，选择兼容的 A2A 1.x Interface。
+2. 通过 `POST /message:send` 发送类型化 Message 与文本 Part。
+3. 轮询 `GET /tasks/{id}`，处理 submitted、working、中断和终态。
+4. 将 Markdown 和结构化 JSON Artifact 统一转换为父 Agent 可消费的结果。
 
-Start the Python LangGraph agent:
+启动 Python LangGraph Agent：
 
 ```bash
 cd examples/a2a-static-analysis-agent
@@ -126,25 +126,33 @@ export CODEFLOW_ANALYSIS_ROOT=/path/to/repository
 codeflow-static-agent
 ```
 
-Then configure `a2a_agents` as shown in [`config.example.yaml`](config.example.yaml). `A2ADelegate` is deferred by default; the model discovers it through `ToolSearch`, keeping the initial tool context small.
+Windows PowerShell 激活虚拟环境时使用：
 
-The sample implements Agent Card discovery, send/get/list/cancel operations, task states, and Markdown/JSON Artifacts. Remote cards and results are size-limited and wrapped as untrusted input before reaching the parent model.
+```powershell
+.\.venv\Scripts\Activate.ps1
+$env:CODEFLOW_ANALYSIS_ROOT = "D:\path\to\repository"
+codeflow-static-agent
+```
 
-## Durable execution
+随后按照 [`config.example.yaml`](config.example.yaml) 配置 `a2a_agents`。`A2ADelegate` 默认采用 Deferred Tool 机制，模型通过 `ToolSearch` 按需发现它，从而减少初始工具上下文。
 
-Each long-running task is persisted as:
+示例 Agent 实现了 Agent Card、发送、查询、列表、取消、任务状态以及 Markdown/JSON Artifact。远程 Card 和结果均有大小限制，并在进入父模型之前被标记为不可信输入。
+
+## 可恢复长程执行
+
+每个长程任务按以下结构持久化：
 
 ```text
 .codeflow/tasks/<task-id>/
-├── task.json       # atomically replaced state snapshot
-└── events.jsonl    # append-only lifecycle audit log
+├── task.json       # 原子替换的任务状态快照
+└── events.jsonl    # 追加式生命周期审计日志
 ```
 
-Snapshots include session linkage, retry budget, resume state, optimistic version, checkpoint metadata, and artifacts. Invalid state transitions and stale writers are rejected. `--resume-task` reloads both the durable checkpoint and the compact-aware conversation session.
+快照包含关联 Session、重试预算、恢复状态、乐观版本、Checkpoint 元数据和 Artifact。系统拒绝非法状态迁移与过期写入；`--resume-task` 会同时恢复 Durable Checkpoint 和支持 Compact 的会话历史。
 
-## Eval-driven development
+## Eval 驱动开发
 
-Print-mode runs automatically write privacy-conscious traces (hidden model reasoning is never persisted):
+Print Mode 会自动写入隐私友好的 Trace，模型隐藏推理不会被持久化：
 
 ```text
 .codeflow/traces/*.json
@@ -162,51 +170,42 @@ Print-mode runs automatically write privacy-conscious traces (hidden model reaso
         └── .codeflow/evals/regression.jsonl
 ```
 
-Generate an aggregate report:
+生成聚合评测报告：
 
 ```bash
 java -jar build/libs/codeflow.jar --eval-report .codeflow/traces
 
-# Compare against a checked baseline and make CI fail on regression.
+# 与基线比较，并在指标退化时让 CI 失败。
 java -jar build/libs/codeflow.jar \
   --eval-report .codeflow/traces \
   --baseline-report eval-baselines/main.json \
   --fail-on-regression
 ```
 
-The report includes success rate, average tokens, p50/p95 latency, tool-error rate, failure distribution, and a non-regression decision.
+报告包含成功率、平均 Token、p50/p95 延迟、工具错误率、失败分布和非退化判断。
 
-## Context engineering
+## 上下文工程
 
-`ContextPolicy` infers `PLANNING`, `EXECUTING`, `VERIFYING`, or `RECOVERING` from recent messages and tool outcomes. It then:
+`ContextPolicy` 根据最近消息和工具结果识别 `PLANNING`、`EXECUTING`、`VERIFYING` 或 `RECOVERING` 阶段，并执行以下策略：
 
-- prioritizes stage-relevant tools;
-- applies Tool Schema count/character budgets;
-- preserves essential discovery/approval tools;
-- exposes omitted tools through `ToolSearch` for exact recovery;
-- selects relevant long-term memory paragraphs under a separate budget;
-- composes with existing tool-result spill, compaction, and recovery attachments.
+- 优先选择与当前阶段相关的工具；
+- 控制 Tool Schema 数量与字符预算；
+- 始终保留发现工具和审批工具；
+- 允许通过 `ToolSearch` 精确恢复被省略的工具；
+- 在独立预算内选择相关长期 Memory 段落；
+- 与 Tool Result Spill、Compact 和 Recovery Attachment 协同工作。
 
-## Development
+## 开发
 
 ```bash
 ./gradlew test
 ./gradlew shadowJar
 ```
 
-The test suite covers protocol parsing/polling, lifecycle recovery and version conflicts, failure classification, regression gates, context selection, memory/compaction, permissions, tools, teams, sessions, and worktrees. CI runs on Linux and Windows with Java 21.
+测试覆盖协议解析与轮询、任务恢复与版本冲突、失败分类、回归门禁、上下文选择、Memory/Compact、权限、工具、Teams、Session 和 Worktree。GitHub Actions 会在 Java 21 环境下同时运行 Linux 与 Windows 测试。
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md), [`SECURITY.md`](SECURITY.md), and the [roadmap](docs/ROADMAP.md).
+更多信息请参阅 [`CONTRIBUTING.md`](CONTRIBUTING.md)、[`SECURITY.md`](SECURITY.md) 和[项目路线图](docs/ROADMAP.md)。
 
-## 中文概览
+## 开源协议
 
-CodeFlow 是一个面向长程研发任务的 Java 21 Agent Harness。本次扩展把原有 ReAct、多 Agent、MCP、ToolSearch、Compact、Memory、Checkpoint、Skill、Worktree、权限与沙箱能力升级为四条可展示的工程闭环：
-
-- **A2A 跨语言协作：**Java Host 通过 Agent Card 发现 Python LangGraph Agent，统一管理远程 TaskState 与 Artifact。
-- **Durable Agent：**任务状态、Checkpoint、事件日志和 Artifact 落盘；进程中断后通过任务 ID 和会话历史恢复。
-- **Eval 驱动开发：**真实 Trace 自动分类失败、沉淀回归集，并比较成功率、Token、p50/p95、工具错误率。
-- **Context Engineering：**按照任务阶段、工具相关性、Memory 相关性和预算动态组装每轮上下文。
-
-## License
-
-Apache License 2.0. Third-party components and bundled skills retain their own license notices. See [`NOTICE`](NOTICE).
+项目采用 Apache License 2.0。第三方组件和可选 Skill 保留各自的许可证声明，详见 [`NOTICE`](NOTICE)。
