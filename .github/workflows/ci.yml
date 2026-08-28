@@ -21,7 +21,6 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
-          cache: gradle
       - uses: gradle/actions/setup-gradle@v5
       - name: Test (Unix)
         if: runner.os != 'Windows'
@@ -52,7 +51,6 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
-          cache: gradle
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
