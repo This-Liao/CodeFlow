@@ -6,22 +6,22 @@
 
 | 验证项 | 实测结果 |
 | --- | --- |
-| 时间（UTC） | 2026-08-27T08:50:22+00:00 |
+| 时间（UTC） | 2026-08-28T07:23:26+00:00 |
 | Gradle 构建 | PASS |
-| JUnit | 202 项；200 通过；0 失败；2 跳过 |
+| JUnit | 205 项；203 通过；0 失败；2 跳过 |
 | 可执行 JAR | 82.88 MiB |
 | A2A Agent | CodeFlow Python Static Analysis Agent |
 | 协议 | A2A 1.0 / HTTP+JSON |
 | 任务终态 | TASK_STATE_COMPLETED |
 | 返回 Artifact | 1 |
-| 实际扫描 Java 文件 | 193 |
+| 实际扫描 Java 文件 | 194 |
 | 静态分析候选问题 | 48 |
-| Java→Python 端到端耗时 | 327 ms |
+| Java→Python 端到端耗时 | 324 ms |
 | Crash-Recovery | PASS；EXECUTING → COMPLETED |
 | Checkpoint 复用 | true |
 | 重复 Tool Call | 0 |
 | 文件哈希保持 | true |
-| 新 JVM 恢复耗时 | 140 ms |
+| 新 JVM 恢复耗时 | 125 ms |
 | Context 基准 | PASS；24 条任务 / 46 个工具 |
 | Context 任务成功率 | 100.0% |
 | 阶段识别准确率 | 100.0% |

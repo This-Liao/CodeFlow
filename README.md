@@ -20,7 +20,7 @@ CodeFlow 是一个面向仓库级研发任务的 Java 21 Agent Runtime。它将 
 
 ![CodeFlow 工作流演示](docs/assets/codeflow-demo.gif)
 
-> 真实模型修复代码并运行测试：[录制证据](docs/demo/product-demo.json) · [工程验证](docs/VALIDATION.md)
+> 真实模型端到端修复与测试 · [独立验证](docs/demo/ui-demo.json)
 
 ## 为什么选择 CodeFlow
 
@@ -108,7 +108,7 @@ java -jar build/libs/codeflow.jar --resume-task cf-...
 
 ## 工程验证
 
-仓库提供可重复执行的一键验证，覆盖四层证据：Gradle 清理构建与完整测试；真实 Java → Python/LangGraph A2A 调用；外部强制终止 JVM-1 后由 JVM-2 从 Checkpoint 恢复且不重复修改；24 条固定任务的 Context / Deferred Tool 消融基准。
+仓库提供可重复执行的一键验证，覆盖四层确定性证据：Gradle 清理构建与完整测试；真实 Java → Python/LangGraph A2A 调用；外部强制终止 JVM-1 后由 JVM-2 从 Checkpoint 恢复且不重复修改；24 条固定任务的 Context / Deferred Tool 消融基准。付费模型环境还可运行 12 条 Coding Tasks 与真实模型双进程 Crash + Resume。
 
 Linux/macOS：
 
@@ -132,11 +132,14 @@ python -m venv .codeflow\demo-venv
 
 | 证据 | 结果 |
 |---|---:|
-| JUnit | 202 项，0 失败 |
-| Java → Python A2A | 扫描 193 个 Java 文件，返回 1 个 Artifact |
+| JUnit | 205 项，0 失败 |
+| Java → Python A2A | 扫描 194 个 Java 文件，返回 1 个 Artifact |
 | 强制崩溃恢复 | `EXECUTING → COMPLETED`，重复 Tool Call 为 0 |
 | Context Policy | 24/24 任务成功，阶段识别 100%，Tool Schema 减少 75.7%，ToolSearch 错误为 0 |
 | 真实模型对照 | `deepseek-v4-flash` 两组均 4/4 成功；Prompt Token 减少 14.8%，p95 延迟减少 65.9% |
+| 真实 Coding Tasks | 12/12 Patch 通过独立测试；11/12 Agent 正常返回终态 |
+| 真实模型 Crash + Resume | JVM-1 在 turn 5 后被强制终止；JVM-2 重复修改 0 次并完成测试 |
+| 真实 Remote UI | 中文任务完成代码修改与测试；UI 外独立验证 PASS |
 
 ## 跨语言 A2A 演示
 
@@ -182,7 +185,15 @@ codeflow-static-agent
 
 快照包含关联 Session、重试预算、恢复状态、乐观版本、Checkpoint 元数据和 Artifact。系统拒绝非法状态迁移与过期写入；`--resume-task` 会同时恢复 Durable Checkpoint 和支持 Compact 的会话历史。
 
-工程验证会让 JVM-1 执行真实 `EditFile` 并原子写入 Checkpoint，然后从外部强制终止进程。JVM-2 重新加载同一任务、接管 owner、跳过已完成步骤，并校验工具审计次数与文件哈希。这里证明的是“安全 Checkpoint 边界上的至少一次调度、已完成步骤不重复执行”，不是任意副作用的分布式 exactly-once 承诺。
+确定性工程验证会让 JVM-1 执行真实 `EditFile` 并原子写入 Checkpoint，然后从外部强制终止进程。JVM-2 重新加载同一任务、接管 owner、跳过已完成步骤，并校验工具审计次数与文件哈希。这里证明的是“安全 Checkpoint 边界上的至少一次调度、已完成步骤不重复执行”，不是任意副作用的分布式 exactly-once 承诺。
+
+付费模型环境可进一步运行真实 Agent 恢复演示：
+
+```bash
+python scripts/run_crash_resume_demo.py --config /path/to/config.yaml
+```
+
+最近一次[真实模型 Crash + Resume 报告](docs/CRASH_RESUME.md)中，进程 1 完成代码修改并持久化 turn 5 后被强制终止；进程 2 复用 11 条 Session 消息完成恢复，只执行验证工具，重复修改为 0，最终状态为 `COMPLETED`。
 
 ## Eval 驱动开发
 
@@ -250,6 +261,16 @@ python scripts/run_model_benchmark.py --config /path/to/config.yaml
 
 最新一次 [`deepseek-v4-flash` 实测报告](docs/MODEL_BENCHMARK.md)中，两组均为 4/4 成功且工具错误为 0；Context Policy 将平均完整 Prompt Token 从 7020 降至 5981（减少 14.8%），p95 延迟从 26.1 秒降至 8.9 秒（减少 65.9%）。该结果只有 4 条固定任务，受模型版本、缓存与采样影响，因此作为 Semantic Layer 证据，不作为默认 CI 门禁。
 
+### 真实 Coding Benchmark
+
+12 条 Coding Tasks 分别运行在独立 Fixture 中。成功判定不依赖模型回答文本：脚本要求源码哈希发生变化、测试源码哈希保持不变，并使用独立 Python 进程重新执行测试。
+
+```bash
+python scripts/run_coding_benchmark.py --config /path/to/config.yaml
+```
+
+最近一次[真实 Coding Benchmark](docs/CODING_BENCHMARK.md)得到 12/12 正确 Patch、11/12 Agent 端到端完成，p50/p95 为 54.4/292.1 秒。唯一未完成任务的 Patch 已通过独立测试，但 Agent 进程没有正常返回终态，因此仍严格计为端到端失败。
+
 ## 开发
 
 ```bash
@@ -259,7 +280,7 @@ python scripts/run_model_benchmark.py --config /path/to/config.yaml
 
 测试覆盖协议解析与轮询、任务恢复与版本冲突、失败分类、回归门禁、上下文选择、Memory/Compact、权限、工具、Teams、Session 和 Worktree。GitHub Actions 会在 Java 21 环境下同时运行 Linux 与 Windows 测试，并在 Ubuntu 上执行 A2A、强制崩溃恢复和 Context 基准门禁。
 
-更多信息请参阅 [`CONTRIBUTING.md`](CONTRIBUTING.md)、[`SECURITY.md`](SECURITY.md) 和[项目路线图](docs/ROADMAP.md)。
+更多信息请参阅 [`CONTRIBUTING.md`](CONTRIBUTING.md)、[`SECURITY.md`](SECURITY.md)、[可观测性设计](docs/OBSERVABILITY.md)和[项目路线图](docs/ROADMAP.md)。
 
 ## 开源协议
 

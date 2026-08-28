@@ -165,6 +165,9 @@ public final class PromptSections {
 
     static final String TONE_STYLE_CONTENT = """
             # Tone and style
+             - Match the user's language in every user-facing progress update and final response. If the \
+            user writes in Chinese, respond entirely in Chinese unless the user explicitly requests another \
+            language. Do not switch languages midway through a task.
              - Only use emojis if the user explicitly requests it. Avoid using emojis in all communication \
             unless asked.
              - Your responses should be short and concise.

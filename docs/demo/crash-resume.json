@@ -1,0 +1,56 @@
+{
+  "timestampUtc": "2026-08-28T06:17:28+00:00",
+  "result": "PASS",
+  "model": "deepseek-v4-flash",
+  "taskId": "cf-39d28481db408c52",
+  "checkpoint": {
+    "state": "EXECUTING",
+    "turn": 5,
+    "toolCalls": 5,
+    "version": 8
+  },
+  "forcedExitCode": 1,
+  "recoveredByNewProcess": true,
+  "sessionMessagesBeforeResume": 11,
+  "initialToolNames": [
+    "ReadFile",
+    "Glob",
+    "Glob",
+    "ReadFile",
+    "WriteFile"
+  ],
+  "resumeToolNames": [
+    "Bash",
+    "Bash",
+    "Bash"
+  ],
+  "resumeMutationToolCalls": 0,
+  "sourceHashPreservedAcrossResume": true,
+  "testsUnchanged": true,
+  "finalState": "COMPLETED",
+  "independentVerification": "PASS",
+  "durationMs": 37917,
+  "resumeUsage": {
+    "inputTokens": 467,
+    "outputTokens": 2145,
+    "cacheReadTokens": 7936,
+    "cacheCreationTokens": 0
+  },
+  "lifecycleEventTypes": [
+    "created",
+    "transition",
+    "transition",
+    "checkpoint",
+    "checkpoint",
+    "checkpoint",
+    "checkpoint",
+    "checkpoint",
+    "recovered",
+    "checkpoint",
+    "checkpoint",
+    "checkpoint",
+    "transition",
+    "checkpoint",
+    "transition"
+  ]
+}

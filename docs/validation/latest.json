@@ -1,31 +1,31 @@
 {
-  "timestampUtc": "2026-08-27T08:50:22+00:00",
+  "timestampUtc": "2026-08-28T07:23:26+00:00",
   "result": "PASS",
   "gradle": {
     "result": "PASS",
     "tests": {
-      "tests": 202,
+      "tests": 205,
       "failures": 0,
       "errors": 0,
       "skipped": 2,
-      "passed": 200
+      "passed": 203
     },
-    "jarBytes": 86902315
+    "jarBytes": 86903052
   },
   "a2a": {
     "agent": "CodeFlow Python Static Analysis Agent",
     "protocolVersion": "1.0",
     "protocolBinding": "HTTP+JSON",
-    "taskId": "d20859e2-09e3-49a9-ad5b-7147255c0559",
+    "taskId": "717465da-a712-4c8b-84e0-1b1f5fbcc515",
     "state": "TASK_STATE_COMPLETED",
     "artifacts": 1,
-    "scannedJavaFiles": 193,
+    "scannedJavaFiles": 194,
     "findings": 48,
-    "durationMs": 327
+    "durationMs": 324
   },
   "durableRecovery": {
     "result": "PASS",
-    "taskId": "cf-42d0f6841127e662",
+    "taskId": "cf-dd646f3b1cb17bab",
     "recoveredFrom": "EXECUTING",
     "checkpointStep": "edit-recovery-fixture",
     "reusedCheckpoint": true,
@@ -35,7 +35,7 @@
     "eventCount": 8,
     "artifacts": 1,
     "finalState": "COMPLETED",
-    "recoveryDurationMs": 140,
+    "recoveryDurationMs": 125,
     "forcedExitCode": 1,
     "checkpointVersion": 4
   },
@@ -56,7 +56,7 @@
         "schemaReductionPct": 0.0,
         "toolSearchCalls": 0,
         "toolErrors": 0,
-        "p95SelectionMicros": 338
+        "p95SelectionMicros": 272
       },
       {
         "name": "deferred-tool",
@@ -69,7 +69,7 @@
         "schemaReductionPct": 65.1,
         "toolSearchCalls": 5,
         "toolErrors": 0,
-        "p95SelectionMicros": 148
+        "p95SelectionMicros": 80
       },
       {
         "name": "context-policy",
@@ -82,7 +82,7 @@
         "schemaReductionPct": 75.7,
         "toolSearchCalls": 6,
         "toolErrors": 0,
-        "p95SelectionMicros": 1109
+        "p95SelectionMicros": 1084
       }
     ]
   },

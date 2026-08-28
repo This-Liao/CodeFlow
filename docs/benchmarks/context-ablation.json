@@ -15,7 +15,7 @@
       "schemaReductionPct": 0.0,
       "toolSearchCalls": 0,
       "toolErrors": 0,
-      "p95SelectionMicros": 338
+      "p95SelectionMicros": 272
     },
     {
       "name": "deferred-tool",
@@ -28,7 +28,7 @@
       "schemaReductionPct": 65.1,
       "toolSearchCalls": 5,
       "toolErrors": 0,
-      "p95SelectionMicros": 148
+      "p95SelectionMicros": 80
     },
     {
       "name": "context-policy",
@@ -41,7 +41,7 @@
       "schemaReductionPct": 75.7,
       "toolSearchCalls": 6,
       "toolErrors": 0,
-      "p95SelectionMicros": 1109
+      "p95SelectionMicros": 1084
     }
   ]
 }

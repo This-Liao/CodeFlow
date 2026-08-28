@@ -49,7 +49,8 @@ public class BashTool implements Tool {
     public void setSandboxConfig(SandboxConfig config) { this.sandboxConfig = config; }
 
     private static final String DESCRIPTION = """
-            Execute a shell command and return stdout and stderr.
+            Execute a command using the platform-native shell and return stdout and stderr.
+            On Windows commands run through cmd.exe; on Linux and macOS they run through bash.
 
             IMPORTANT: Avoid using this tool to run cat, head, tail, sed, awk, or echo commands. \
             Instead use the dedicated ReadFile, EditFile, or WriteFile tools which provide a better experience.
@@ -60,7 +61,7 @@ public class BashTool implements Tool {
             - Try to maintain your current working directory using absolute paths; avoid cd unless the user explicitly requests it.
             - Optional timeout in seconds (max 600). Default is 120s.
             - When issuing multiple independent commands, make separate parallel tool calls instead of chaining with &&.
-            - Use && to chain sequential dependent commands. Use ; only when you don't care if earlier commands fail.
+            - Use && to chain sequential dependent commands. Use separate tool calls for independent commands.
             - DO NOT use newlines to separate commands.
 
             Git Safety Protocol:
@@ -122,7 +123,8 @@ public class BashTool implements Tool {
                 actualCommand = sandbox.wrap(command, sandboxConfig);
             }
 
-            ProcessBuilder pb = new ProcessBuilder("bash", "-c", actualCommand);
+            ProcessBuilder pb = new ProcessBuilder(shellCommand(
+                    actualCommand, System.getProperty("os.name", "unknown")));
             // 合并 stdout 和 stderr 到同一个流，简化输出解析
             pb.redirectErrorStream(true);
 
@@ -175,6 +177,14 @@ public class BashTool implements Tool {
             Thread.currentThread().interrupt();
             return ToolResult.error("Error: command interrupted");
         }
+    }
+
+    /** Build the native shell invocation without requiring bash/WSL on Windows. */
+    static List<String> shellCommand(String command, String osName) {
+        if (osName != null && osName.toLowerCase().startsWith("windows")) {
+            return List.of("cmd.exe", "/d", "/s", "/c", command);
+        }
+        return List.of("bash", "-c", command);
     }
 
     /**

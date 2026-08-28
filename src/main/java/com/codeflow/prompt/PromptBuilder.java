@@ -63,9 +63,17 @@ public class PromptBuilder {
         String workDir = System.getProperty("user.dir");
         String osName = System.getProperty("os.name", "unknown").toLowerCase();
         String arch = System.getProperty("os.arch", "unknown");
-        String shell = System.getenv("SHELL");
-        if (shell == null || shell.isEmpty()) {
-            shell = "bash";
+        String shell;
+        if (osName.startsWith("windows")) {
+            shell = System.getenv("ComSpec");
+            if (shell == null || shell.isEmpty()) {
+                shell = "cmd.exe";
+            }
+        } else {
+            shell = System.getenv("SHELL");
+            if (shell == null || shell.isEmpty()) {
+                shell = "bash";
+            }
         }
 
         boolean isGitRepo = false;
