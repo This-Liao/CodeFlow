@@ -26,7 +26,7 @@ dependencies {
     implementation("com.github.ajalt.mordant:mordant-markdown:3.0.2")
 
     // MCP SDK
-    implementation("io.modelcontextprotocol.sdk:mcp:1.1.3")
+    implementation("io.modelcontextprotocol.sdk:mcp:2.0.1")
     implementation("org.slf4j:slf4j-nop:2.0.16")
 
     // LLM SDKs
