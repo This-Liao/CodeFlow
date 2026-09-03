@@ -27,7 +27,7 @@ dependencies {
 
     // MCP SDK
     implementation("io.modelcontextprotocol.sdk:mcp:1.1.3")
-    implementation("org.slf4j:slf4j-nop:2.0.16")
+    implementation("org.slf4j:slf4j-nop:2.0.18")
 
     // LLM SDKs
     implementation("com.anthropic:anthropic-java:2.34.0")
