@@ -45,7 +45,7 @@ dependencies {
     implementation("io.javalin:javalin:6.6.0")
 
     // Config & JSON
-    implementation("org.yaml:snakeyaml:2.2")
+    implementation("org.yaml:snakeyaml:2.7")
     implementation("com.fasterxml.jackson.core:jackson-databind:2.21.3")
 
     // Test
