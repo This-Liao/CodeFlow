@@ -14,6 +14,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.HashMap;
+import java.util.concurrent.ConcurrentHashMap;
 
 /** Stage-aware context assembler for tool schemas and long-term memory. */
 public final class ContextPolicy {
@@ -23,9 +25,16 @@ public final class ContextPolicy {
             "一个", "这个", "进行", "以及", "需要", "可以", "然后", "当前", "项目");
 
     private final ContextPolicyConfig config;
+    private final EmbeddingProvider embeddingProvider;
+    private final Map<String, double[]> toolVectorCache = new ConcurrentHashMap<>();
 
     public ContextPolicy(ContextPolicyConfig config) {
+        this(config, providerFor(config));
+    }
+
+    public ContextPolicy(ContextPolicyConfig config, EmbeddingProvider embeddingProvider) {
         this.config = config == null ? new ContextPolicyConfig() : config;
+        this.embeddingProvider = embeddingProvider;
     }
 
     public Selection apply(ToolRegistry registry, String protocol, ConversationManager conversation) {
@@ -39,12 +48,16 @@ public final class ContextPolicy {
         String recent = recentContext(conversation);
         ContextStage stage = inferStage(recent);
         Set<String> tokens = tokens(recent);
+        List<Tool> candidates = registry.listTools().stream()
+                .filter(tool -> !tool.shouldDefer() || registry.isDiscovered(tool.name()))
+                .toList();
+        Map<String, Double> vectorScores = vectorSimilarities(recent, candidates);
         var scored = new ArrayList<ScoredTool>();
-        for (Tool tool : registry.listTools()) {
-            if (tool.shouldDefer() && !registry.isDiscovered(tool.name())) continue;
-            scored.add(new ScoredTool(tool, score(tool, stage, tokens), schemaChars(tool)));
+        for (Tool tool : candidates) {
+            scored.add(new ScoredTool(tool,
+                    score(tool, stage, tokens, vectorScores.get(tool.name())), schemaChars(tool)));
         }
-        scored.sort(Comparator.comparingInt(ScoredTool::score).reversed()
+        scored.sort(Comparator.comparingDouble(ScoredTool::score).reversed()
                 .thenComparing(value -> value.tool().name()));
 
         int maxCount = Math.max(4, config.getMaxToolSchemas());
@@ -74,15 +87,20 @@ public final class ContextPolicy {
         int budget = Math.max(1_000, config.getMaxMemoryChars());
         Set<String> query = tokens(recentContext(conversation));
         String[] paragraphs = memory.split("\\R\\s*\\R");
+        List<String> paragraphList = java.util.Arrays.stream(paragraphs)
+                .map(String::strip).toList();
+        List<Double> vectorScores = paragraphSimilarities(recentContext(conversation), paragraphList);
         var scored = new ArrayList<ScoredParagraph>();
         for (int i = 0; i < paragraphs.length; i++) {
             String paragraph = paragraphs[i].strip();
             int overlap = 0;
             Set<String> paragraphTokens = tokens(paragraph);
             for (String token : query) if (paragraphTokens.contains(token)) overlap++;
-            scored.add(new ScoredParagraph(i, paragraph, overlap));
+            Double vector = i < vectorScores.size() ? vectorScores.get(i) : null;
+            scored.add(new ScoredParagraph(i, paragraph,
+                    blend(overlap * 20.0, vector, 100.0)));
         }
-        scored.sort(Comparator.comparingInt(ScoredParagraph::score).reversed()
+        scored.sort(Comparator.comparingDouble(ScoredParagraph::score).reversed()
                 .thenComparing(Comparator.comparingInt(ScoredParagraph::index).reversed()));
         var keep = new HashSet<Integer>();
         int chars = 0;
@@ -114,19 +132,127 @@ public final class ContextPolicy {
         return ContextStage.EXECUTING;
     }
 
-    private static int score(Tool tool, ContextStage stage, Set<String> query) {
+    private double score(Tool tool, ContextStage stage, Set<String> query, Double vectorSimilarity) {
         String name = tool.name();
         if (isEssential(name)) return 100_000;
         String searchable = (name + " " + tool.description()).toLowerCase(Locale.ROOT);
-        int score = 0;
-        for (String token : query) if (searchable.contains(token)) score += 20;
-        score += switch (stage) {
+        int lexical = 0;
+        for (String token : query) if (searchable.contains(token)) lexical += 20;
+        int stageScore = switch (stage) {
             case PLANNING -> containsAny(searchable, "read", "grep", "glob", "search", "task", "agent") ? 300 : 0;
             case EXECUTING -> containsAny(searchable, "write", "edit", "bash", "agent", "worktree", "task") ? 300 : 0;
             case VERIFYING -> containsAny(searchable, "bash", "test", "read", "grep", "eval", "durable") ? 300 : 0;
             case RECOVERING -> containsAny(searchable, "read", "bash", "task", "durable", "agent", "message") ? 300 : 0;
         };
-        return score;
+        return stageScore + blend(lexical, vectorSimilarity, 400.0);
+    }
+
+    private double blend(double lexicalScore, Double vectorSimilarity, double vectorScale) {
+        Strategy strategy = strategy();
+        if (strategy == Strategy.LEXICAL || vectorSimilarity == null
+                || !Double.isFinite(vectorSimilarity)) {
+            return lexicalScore;
+        }
+        double vectorScore = Math.max(0, vectorSimilarity) * vectorScale;
+        if (strategy == Strategy.VECTOR) return vectorScore;
+        double lexicalWeight = clamp(config.getLexicalWeight());
+        double vectorWeight = clamp(config.getVectorWeight());
+        double total = lexicalWeight + vectorWeight;
+        if (total <= 0) return lexicalScore;
+        return lexicalScore * lexicalWeight / total + vectorScore * vectorWeight / total;
+    }
+
+    private Map<String, Double> vectorSimilarities(String query, List<Tool> tools) {
+        if (embeddingProvider == null || strategy() == Strategy.LEXICAL || tools.isEmpty()) return Map.of();
+        try {
+            var inputs = new ArrayList<String>();
+            inputs.add(query);
+            var missing = new ArrayList<Tool>();
+            for (Tool tool : tools) {
+                String key = toolVectorKey(tool);
+                if (!toolVectorCache.containsKey(key)) {
+                    missing.add(tool);
+                    inputs.add(toolText(tool));
+                }
+            }
+            List<double[]> embedded = embeddingProvider.embed(inputs);
+            if (embedded.size() != inputs.size()) return Map.of();
+            double[] queryVector = embedded.getFirst();
+            for (int i = 0; i < missing.size(); i++) {
+                toolVectorCache.put(toolVectorKey(missing.get(i)), embedded.get(i + 1));
+            }
+            var result = new HashMap<String, Double>();
+            for (Tool tool : tools) {
+                double[] vector = toolVectorCache.get(toolVectorKey(tool));
+                if (vector != null) result.put(tool.name(), cosine(queryVector, vector));
+            }
+            return result;
+        } catch (Exception ignored) {
+            return Map.of();
+        }
+    }
+
+    private List<Double> paragraphSimilarities(String query, List<String> paragraphs) {
+        if (embeddingProvider == null || strategy() == Strategy.LEXICAL || paragraphs.isEmpty()) return List.of();
+        try {
+            var inputs = new ArrayList<String>();
+            inputs.add(query);
+            inputs.addAll(paragraphs);
+            List<double[]> embedded = embeddingProvider.embed(inputs);
+            if (embedded.size() != inputs.size()) return List.of();
+            double[] queryVector = embedded.getFirst();
+            var result = new ArrayList<Double>(paragraphs.size());
+            for (int i = 1; i < embedded.size(); i++) result.add(cosine(queryVector, embedded.get(i)));
+            return result;
+        } catch (Exception ignored) {
+            return List.of();
+        }
+    }
+
+    private Strategy strategy() {
+        String value = config.getStrategy() == null ? "hybrid"
+                : config.getStrategy().strip().toLowerCase(Locale.ROOT);
+        return switch (value) {
+            case "lexical" -> Strategy.LEXICAL;
+            case "vector" -> Strategy.VECTOR;
+            default -> Strategy.HYBRID;
+        };
+    }
+
+    private static EmbeddingProvider providerFor(ContextPolicyConfig value) {
+        ContextPolicyConfig config = value == null ? new ContextPolicyConfig() : value;
+        var embedding = config.getEmbedding();
+        if (embedding == null || !embedding.isEnabled()
+                || "lexical".equalsIgnoreCase(config.getStrategy())) return null;
+        if ("openai-compatible".equalsIgnoreCase(embedding.getProvider())
+                || "openai".equalsIgnoreCase(embedding.getProvider())) {
+            return new OpenAiEmbeddingProvider(embedding);
+        }
+        return new FeatureHashEmbeddingProvider(embedding.getDimensions());
+    }
+
+    private static String toolVectorKey(Tool tool) {
+        return tool.name() + "\n" + tool.description();
+    }
+
+    private static String toolText(Tool tool) {
+        return tool.name() + ". " + tool.description();
+    }
+
+    private static double cosine(double[] left, double[] right) {
+        if (left == null || right == null || left.length != right.length || left.length == 0) return 0;
+        double dot = 0, leftNorm = 0, rightNorm = 0;
+        for (int i = 0; i < left.length; i++) {
+            dot += left[i] * right[i];
+            leftNorm += left[i] * left[i];
+            rightNorm += right[i] * right[i];
+        }
+        if (leftNorm == 0 || rightNorm == 0) return 0;
+        return dot / Math.sqrt(leftNorm * rightNorm);
+    }
+
+    private static double clamp(double value) {
+        return Math.max(0, Math.min(1, value));
     }
 
     private static boolean isEssential(String name) {
@@ -169,6 +295,7 @@ public final class ContextPolicy {
 
     public record Selection(ContextStage stage, List<String> omittedTools, int selectedTools,
                             int estimatedSchemaChars) {}
-    private record ScoredTool(Tool tool, int score, int schemaChars) {}
-    private record ScoredParagraph(int index, String text, int score) {}
+    private enum Strategy { LEXICAL, VECTOR, HYBRID }
+    private record ScoredTool(Tool tool, double score, int schemaChars) {}
+    private record ScoredParagraph(int index, String text, double score) {}
 }

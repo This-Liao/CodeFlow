@@ -14,7 +14,7 @@
 
 CodeFlow 是一个面向仓库级研发任务的 Java 21 Agent Runtime。它将 ReAct 循环、本地多 Agent 与 Worktree 隔离、MCP 工具、A2A 跨语言委派、可恢复长程执行、上下文预算和基于 Trace 的回归评测整合在同一个工程化平台中。
 
-[架构](#架构) · [快速开始](#快速开始) · [工程验证](#工程验证) · [A2A 演示](#跨语言-a2a-演示) · [评测](#eval-驱动开发) · [基准](#context--deferred-tool-基准) · [开发指南](#开发)
+[架构](#架构) · [运行模式](#运行模式一致性) · [快速开始](#快速开始) · [工程验证](#工程验证) · [A2A 演示](#跨语言-a2a-演示) · [评测](#eval-驱动开发) · [限制](#已知限制) · [开发指南](#开发)
 
 </div>
 
@@ -63,11 +63,29 @@ stateDiagram-v2
 | Agent Harness | 流式 ReAct 循环、并行只读工具、串行变更、Hooks、权限与重试 |
 | 本地多 Agent | 后台子 Agent、Teams、Mailbox、任务看板、Coordinator 与 Git Worktree |
 | A2A Host | A2A 1.0 Agent Card、HTTP+JSON、JSON-RPC、Task 轮询和 Artifact 归一化 |
-| Durable Execution | 原子任务快照、追加式事件日志、乐观版本控制、跨进程恢复、暂停与重试 |
-| Context Policy | 阶段识别、Tool Schema 预算、Deferred Tool 发现和相关 Memory 选择 |
+| Durable Execution | 本地原子快照或 PostgreSQL 共享状态、事件审计、乐观版本、租约、fencing token、跨进程恢复 |
+| Context Policy | 阶段识别、词法/向量 Hybrid 相关度、Tool Schema 预算、Deferred Tool 发现和 Memory 选择 |
 | Eval Loop | Trace 捕获、八类失败分类、Regression JSONL、成功率、Token、延迟和工具错误报告 |
+| Observability | Agent/LLM/Tool/A2A Span、OTLP/HTTP 导出与 Java → Python W3C Trace Context 关联 |
 | 上下文连续性 | Tool Result Spill、自动 Compact、Recovery Attachment、Session 和长期 Memory |
 | 安全机制 | 权限模式、前后置 Hook、系统沙箱、响应大小限制和不可信 A2A 数据边界 |
+
+## 运行模式一致性
+
+TUI、Remote 与 Print 共享同一个 `AgentRuntime` 生命周期；界面层只负责渲染、权限交互和输入适配，不再各自维护 Trace、Memory、Skill 或 Durable 状态逻辑。
+
+| 能力 | TUI | Remote Web UI | Print |
+|---|:---:|:---:|:---:|
+| ReAct、工具执行与 Context Policy | ✅ | ✅ | ✅ |
+| 每次运行自动 Trace | ✅ | ✅ | ✅ |
+| Memory 注入、Recall、提取与整理 | ✅ | ✅ | ✅ |
+| Skill 发现、提示词目录与按需加载 | ✅ | ✅ | ✅ |
+| Durable 创建、Checkpoint 与状态机 | ✅ | ✅ | ✅ |
+| 主动取消实际 Agent/Tool Worker | `Ctrl+C` | 停止按钮 / WS `cancel` | —（非交互） |
+| Durable 任务列表与恢复入口 | —（仅 Session 恢复） | 原生任务栏 / `/resume-task` | `--resume-task` |
+| 权限与 AskUser | 终端对话框 | WebSocket 对话框 | 自动策略 |
+
+这里的“一致”指底层执行语义一致，不表示三种界面拥有完全相同的交互控件。对应取舍记录在 [ADR-0001](docs/adr/0001-shared-agent-runtime.md)。
 
 ## 快速开始
 
@@ -106,6 +124,8 @@ java -jar build/libs/codeflow.jar --resume-task cf-...
 
 任务快照与事件日志保存在 `.codeflow/tasks/`，会话历史与 Compact 边界保存在 `.codeflow/sessions/`；这些运行数据都不会提交到 Git。配置统一使用 `.codeflow/config.yaml` 或 `CODEFLOW_CONFIG` 指定的路径。
 
+多进程共享任务时可将 `durable_store.backend` 设为 `postgres`，并通过 `CODEFLOW_POSTGRES_URL`、`CODEFLOW_POSTGRES_USER`、`CODEFLOW_POSTGRES_PASSWORD` 提供连接信息。Runtime 会自动申请租约、周期续租，并以 fencing token 保护每次状态和 Checkpoint 写入；本地单进程无需安装数据库。
+
 ## 工程验证
 
 仓库提供可重复执行的一键验证，覆盖四层确定性证据：Gradle 清理构建与完整测试；真实 Java → Python/LangGraph A2A 调用；外部强制终止 JVM-1 后由 JVM-2 从 Checkpoint 恢复且不重复修改；24 条固定任务的 Context / Deferred Tool 消融基准。付费模型环境还可运行 12 条 Coding Tasks 与真实模型双进程 Crash + Resume。
@@ -132,14 +152,15 @@ python -m venv .codeflow\demo-venv
 
 | 证据 | 结果 |
 |---|---:|
-| JUnit | 205 项，0 失败 |
-| Java → Python A2A | 扫描 194 个 Java 文件，返回 1 个 Artifact |
+| JUnit | 215 项，0 失败，3 项按外部环境跳过 |
+| Java → Python A2A + Trace | 扫描 210 个 Java 文件，返回 1 个 Artifact，Java/Python Trace ID 一致 |
 | 强制崩溃恢复 | `EXECUTING → COMPLETED`，重复 Tool Call 为 0 |
-| Context Policy | 24/24 任务成功，阶段识别 100%，Tool Schema 减少 75.7%，ToolSearch 错误为 0 |
+| Hybrid Context Policy | 24/24 任务成功，阶段识别 100%，Tool Schema 减少 75.5%，ToolSearch 错误为 0 |
 | 真实模型对照 | `deepseek-v4-flash` 两组均 4/4 成功；Prompt Token 减少 14.8%，p95 延迟减少 65.9% |
 | 真实 Coding Tasks | 12/12 Patch 通过独立测试；11/12 Agent 正常返回终态 |
 | 真实模型 Crash + Resume | JVM-1 在 turn 5 后被强制终止；JVM-2 重复修改 0 次并完成测试 |
-| 真实 Remote UI | 中文任务完成代码修改与测试；UI 外独立验证 PASS |
+| 真实 Remote UI | 12/12 任务完成代码修改、Durable 生命周期、Trace 与 UI 外独立测试 |
+| PostgreSQL 多 Worker | 实现双 Worker 抢占、心跳与 fencing 集成测试；本机未配置测试账号，本轮按条件跳过 |
 
 ## 跨语言 A2A 演示
 
@@ -173,6 +194,8 @@ codeflow-static-agent
 
 示例 Agent 实现了 Agent Card、发送、查询、列表、取消、任务状态以及 Markdown/JSON Artifact。远程 Card 和结果均有大小限制，并在进入父模型之前被标记为不可信输入。
 
+Java 的 A2A Client 会在发现、提交和轮询请求中注入 W3C `traceparent`；Python FastAPI 服务提取该上下文，并传入异步 LangGraph 执行。设置 `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318` 后，两端 Span 可进入同一个 OTLP Collector；未配置 Collector 时仍生成和传播有效 Trace ID，但不进行网络导出。本轮真实进程验证得到 `traceCorrelated=true`，详见[可观测性设计与验证](docs/OBSERVABILITY.md)。
+
 ## 可恢复长程执行
 
 每个长程任务按以下结构持久化：
@@ -187,6 +210,8 @@ codeflow-static-agent
 
 确定性工程验证会让 JVM-1 执行真实 `EditFile` 并原子写入 Checkpoint，然后从外部强制终止进程。JVM-2 重新加载同一任务、接管 owner、跳过已完成步骤，并校验工具审计次数与文件哈希。这里证明的是“安全 Checkpoint 边界上的至少一次调度、已完成步骤不重复执行”，不是任意副作用的分布式 exactly-once 承诺。
 
+PostgreSQL 后端面向多 Worker：领取任务使用 `FOR UPDATE SKIP LOCKED`，租约包含单调递增的 fencing token；后续状态迁移、Checkpoint 和 Artifact 写入必须同时匹配 Worker、token 且租约有效。租约丢失会取消实际 Agent worker，并把任务留给其他进程恢复。实现仍保留本地 JSON 为默认后端，详见 [ADR-0003](docs/adr/0003-postgresql-durable-workers.md) 和[双 Worker 验证说明](examples/postgres-workers/README.md)。
+
 付费模型环境可进一步运行真实 Agent 恢复演示：
 
 ```bash
@@ -197,7 +222,7 @@ python scripts/run_crash_resume_demo.py --config /path/to/config.yaml
 
 ## Eval 驱动开发
 
-Print Mode 会自动写入隐私友好的 Trace，模型隐藏推理不会被持久化：
+TUI、Remote 和 Print 通过共享 Runtime 自动写入隐私友好的 Trace，模型隐藏推理不会被持久化：
 
 ```text
 .codeflow/traces/*.json
@@ -236,6 +261,7 @@ java -jar build/libs/codeflow.jar \
 `ContextPolicy` 根据最近消息和工具结果识别 `PLANNING`、`EXECUTING`、`VERIFYING` 或 `RECOVERING` 阶段，并执行以下策略：
 
 - 优先选择与当前阶段相关的工具；
+- 以阶段先验 + 词法相关度 + 向量相似度组成 Hybrid 分数；
 - 控制 Tool Schema 数量与字符预算；
 - 始终保留发现工具和审批工具；
 - 允许通过 `ToolSearch` 精确恢复被省略的工具；
@@ -244,13 +270,15 @@ java -jar build/libs/codeflow.jar \
 
 ## Context / Deferred Tool 基准
 
-仓库内置 24 条固定任务和 46 个工具的消融基准，对比全量注入、Deferred Tool 和阶段感知 Context Policy。它直接运行 Java 实现，校验阶段识别、初始 Tool Recall、Schema 字符数、`ToolSearch` 恢复和工具错误；CI 要求任务成功率与阶段识别均为 100%、Schema 至少减少 60%、工具错误为 0。
+仓库内置 24 条固定任务和 46 个工具的消融基准，对比全量注入、Deferred Tool、Lexical、Vector 和 Hybrid Context Policy。它直接运行 Java 实现，校验阶段识别、初始 Tool Recall、Schema 字符数、`ToolSearch` 恢复和工具错误；CI 要求任务成功率与阶段识别均为 100%、Schema 至少减少 60%、工具错误为 0。
 
 ```bash
 java -cp build/libs/codeflow.jar com.codeflow.benchmark.ContextAblationMain
 ```
 
 [`docs/BENCHMARK.md`](docs/BENCHMARK.md) 中的 Estimated Input Tokens 只按 Schema 字符数估算，用于同任务集的相对比较，不冒充模型账单或真实语义成功率。
+
+当前固定集上 Hybrid 保持 100% 最终成功并减少 75.5% Schema 字符，但初始 Tool Recall 与纯 Lexical/Vector 均为 84.6%，因此这里只证明“压缩后可通过 ToolSearch 恢复”，不宣称向量层已带来准确率提升。本地默认使用无需模型下载的 feature-hash 向量；若选择 OpenAI-compatible Embedding，Tool 描述和 Memory 片段会发送到用户配置的端点。
 
 如本机已配置付费模型，可额外运行隔离、只读的真实模型对照。该脚本记录实际 API Usage、任务成功率、Tool Call 和延迟，但不把 Key、Base URL 或回答正文写入报告：
 
@@ -270,6 +298,33 @@ python scripts/run_coding_benchmark.py --config /path/to/config.yaml
 ```
 
 最近一次[真实 Coding Benchmark](docs/CODING_BENCHMARK.md)得到 12/12 正确 Patch、11/12 Agent 端到端完成，p50/p95 为 54.4/292.1 秒。唯一未完成任务的 Patch 已通过独立测试，但 Agent 进程没有正常返回终态，因此仍严格计为端到端失败。
+
+### 真实 Remote 交互回归
+
+`scripts/run_interactive_regression.py` 不调用 Print Mode，而是逐条启动真实 Remote Server，通过浏览器同协议的 WebSocket 发送 Coding Task，响应权限请求，核对 `durable_task` / `tool_use` / `loop_complete` 事件，再用独立进程运行不可修改的测试：
+
+```bash
+python scripts/run_interactive_regression.py --config /path/to/config.yaml
+```
+
+回归清单中的 12 条任务已全部通过：12/12 源码修改通过独立测试，12/12 Durable 任务到达 `COMPLETED`，12/12 生成 Trace。报告见 [`docs/INTERACTIVE_REGRESSION.md`](docs/INTERACTIVE_REGRESSION.md)。
+
+## 已知限制
+
+- 本地文件、Shell 和外部系统副作用仍是至少一次语义；Checkpoint 能避免已确认步骤重复，但不承诺通用 exactly-once。
+- TUI 当前只有 Session 恢复，没有 Remote UI 那样的 Durable 任务选择器；底层任务与 Trace 生命周期已经一致。
+- A2A 目前支持 HTTP+JSON、JSON-RPC、轮询与取消，尚未实现流式消息和 Push Notification。
+- 默认 feature-hash Vector 适合离线、可复现消融，不等价于训练型语义 Embedding；外部 Embedding 必须由用户显式配置。
+- PostgreSQL 后端每次操作直接获取 JDBC Connection，尚未集成连接池；真实双 Worker 测试需要设置 `CODEFLOW_TEST_POSTGRES_*`，默认 CI 会跳过。
+- OTel 当前关联单次 Java → Python A2A 调用；Crash 前后两个进程以 Durable Task ID 查询关联，尚未持久化 Span Link。
+- Remote/TUI/Print 统一的是运行生命周期；工具构建中与界面有关的 Permission/AskUser 回调仍由各适配器装配。
+
+## 架构决策
+
+- [ADR-0001：共享 Agent Runtime 与展示适配器](docs/adr/0001-shared-agent-runtime.md)
+- [ADR-0002：Hybrid Context Policy](docs/adr/0002-hybrid-context-policy.md)
+- [ADR-0003：PostgreSQL Durable 多 Worker](docs/adr/0003-postgresql-durable-workers.md)
+- [ADR-0004：OTel 与 A2A Trace Correlation](docs/adr/0004-otel-a2a-trace-correlation.md)
 
 ## 开发
 

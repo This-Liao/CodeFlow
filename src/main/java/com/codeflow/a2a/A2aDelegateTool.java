@@ -3,7 +3,7 @@ package com.codeflow.a2a;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.codeflow.config.A2aAgentConfig;
 import com.codeflow.durable.DurableTaskState;
-import com.codeflow.durable.DurableTaskStore;
+import com.codeflow.durable.DurableTaskRepository;
 import com.codeflow.tool.Tool;
 import com.codeflow.tool.ToolCategory;
 import com.codeflow.tool.ToolResult;
@@ -16,9 +16,9 @@ import java.util.Map;
 public final class A2aDelegateTool implements Tool {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private final Map<String, A2aAgentConfig> agents;
-    private final DurableTaskStore durableStore;
+    private final DurableTaskRepository durableStore;
 
-    public A2aDelegateTool(List<A2aAgentConfig> configs, DurableTaskStore durableStore) {
+    public A2aDelegateTool(List<A2aAgentConfig> configs, DurableTaskRepository durableStore) {
         this.agents = new LinkedHashMap<>();
         if (configs != null) configs.stream().filter(A2aAgentConfig::isEnabled)
                 .forEach(config -> agents.put(config.getName(), config));

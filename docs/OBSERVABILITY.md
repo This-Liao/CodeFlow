@@ -1,26 +1,53 @@
-# OpenTelemetry 与 A2A Trace Correlation 决策
+# OpenTelemetry 与 A2A Trace Correlation
 
-## 结论
+## 当前实现
 
-值得实现，但不应先于真实 Coding Benchmark 和真实 Crash + Resume 证据。CodeFlow 目前已经能够回答“任务是否成功、调用了哪些工具、Token 与延迟是多少”；下一步 OpenTelemetry 应解决的是“一个长尾失败跨 Java 主 Agent、A2A HTTP 和 Python Agent 时，时间消耗和错误具体发生在哪里”。
+CodeFlow 已在共享 Runtime 中接入 OpenTelemetry，并覆盖以下 Span：
 
-当前代码没有宣称已经接入 OpenTelemetry。本文件定义后续最小实现范围，避免只增加依赖或导出没有关联关系的 Span。
+```text
+codeflow.agent.run
+├── codeflow.llm.stream
+├── codeflow.tool.execute
+└── codeflow.a2a.delegate
+    ├── codeflow.a2a.discover
+    └── W3C traceparent → Python FastAPI SERVER span
+        └── codeflow.a2a.task.execute（异步 LangGraph）
+```
 
-## 最小范围
+Agent 根 Context 会显式传入虚拟线程；并行只读工具把当前 Context 包装进每个 `Callable`。A2A Client 在 Agent Card、消息提交和轮询请求上注入 W3C `traceparent`。Python 服务从请求头提取 Context，并在 HTTP 响应结束后继续把父上下文传给后台 LangGraph Task。
 
-- 默认关闭、无 Collector 时保持 No-op，不改变现有 CLI 行为。
-- 使用 W3C Trace Context，在 CodeFlow 拥有且显式配置的 A2A 端点之间传播 `traceparent`。
-- Java 与 Python 至少形成以下 Span：`agent.run`、`agent.turn`、`tool.execute`、`a2a.delegate`、`a2a.remote.execute`。
-- Span 只记录任务 ID、Agent 名、工具名、状态、Token 数和耗时；不记录 Prompt、模型回答、源码、Tool Result、API Key 或任意 PII。
-- 不传播 Baggage；来自不可信外部端点的 Trace Context 必须校验，并允许按 Agent 配置关闭接收。
-- OTLP Exporter 作为可选运行时配置，而不是默认打包并强制连接外部后端。
+## 配置
 
-## 验收标准
+不配置 Collector 时，Java/Python 仍生成并传播有效 Trace ID，但不会进行遥测网络请求。导出到同一个 OTLP/HTTP Collector：
 
-1. Java → Python A2A 验证中，两端 Span 具有同一 Trace ID，远端 Span 的 Parent 指向 Java A2A Client Span。
-2. Agent Crash + Resume 产生两个 Process Span，并通过 Durable Task ID 建立 Link；不伪造跨进程 Parent。
-3. 禁用遥测时，现有 205 项测试、A2A、Durable Recovery 和 Context 门禁结果不变。
-4. 自动化测试检查导出属性中不存在 Prompt、源码内容、凭据与 Tool Result。
-5. 用 Coding Benchmark 中“Patch 正确但 Agent 未返回终态”的案例证明 Trace 能定位长尾阶段，而不是只展示一张空的 Trace 图。
+```powershell
+$env:OTEL_EXPORTER_OTLP_ENDPOINT = "http://localhost:4318"
+$env:OTEL_SERVICE_NAME = "codeflow-java" # Python 进程可单独设为 codeflow-python-a2a
+```
 
-OpenTelemetry Java 官方将 Trace、Metric 与 Log 标为稳定，并建议库只依赖 API、由应用安装 SDK；CodeFlow 后续实现应遵循这种 API-first、Exporter 可选的方式。上下文传播只应发生在受信任的自有 A2A 边界。
+也可直接设置带 `/v1/traces` 的 `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`。`OTEL_SDK_DISABLED=true` 会完全关闭 SDK 与传播。
+
+## 数据边界
+
+Span 仅记录运行模式、Session/Durable Task ID、模型名、协议、工具名、状态、Token 数与错误摘要。不会写入 Prompt、模型回答、源码、工具参数、Tool Result、API Key 或 Baggage。远程 A2A 返回内容仍经过不可信输入边界后才交给父 Agent。
+
+## 真实进程验证
+
+2026-09-08 的本机验证启动真实 Python/FastAPI/LangGraph 进程，再由 fat JAR 执行 Java A2A Client：
+
+| 指标 | 结果 |
+|---|---:|
+| A2A 协议 | 1.0 / HTTP+JSON |
+| Python Task | `TASK_STATE_COMPLETED` |
+| 扫描 Java 文件 | 210 |
+| Artifact | 1 |
+| Java/Python Trace ID | `0affb88f875df1a6fe77e41fa51b6a89` |
+| Correlation | PASS |
+
+机器可读证据见 [`docs/observability/latest.json`](observability/latest.json)。此外，`A2aClientTest` 的真实 HTTP Server 会断言请求包含非零 W3C Trace/Span ID。
+
+## 尚未覆盖
+
+- Crash 前后两个进程目前依赖相同 Durable Task ID 查询，尚未持久化 OpenTelemetry Span Link。
+- 当前未提交 Collector/Jaeger 截图；仓库验证的是实际传播与 Trace ID 一致性，不用 UI 截图替代协议断言。
+- 暂不传播 Baggage，避免把业务字段无边界地带到远程 Agent。

@@ -122,6 +122,7 @@ public class ConfigLoader {
             base.setA2aAgents(agents);
         }
         if (override.getContextPolicy() != null) base.setContextPolicy(override.getContextPolicy());
+        if (override.getDurableStore() != null) base.setDurableStore(override.getDurableStore());
         if (override.getHooks() != null) {
             var hooks = base.getHooks() != null
                     ? new ArrayList<>(base.getHooks()) : new ArrayList<HookConfig>();
@@ -187,6 +188,19 @@ public class ConfigLoader {
                 } catch (IllegalArgumentException e) {
                     throw new ConfigException("A2A agent #%d has invalid HTTP(S) card_url".formatted(i + 1));
                 }
+            }
+        }
+        if (cfg.getDurableStore() != null) {
+            String backend = cfg.getDurableStore().getBackend();
+            if (!("local".equalsIgnoreCase(backend) || "postgres".equalsIgnoreCase(backend))) {
+                throw new ConfigException("durable_store.backend must be local or postgres");
+            }
+            String schema = cfg.getDurableStore().getSchema();
+            if (schema == null || !schema.matches("[A-Za-z_][A-Za-z0-9_]{0,62}")) {
+                throw new ConfigException("durable_store.schema must be a safe PostgreSQL identifier");
+            }
+            if (cfg.getDurableStore().getLeaseSeconds() < 5) {
+                throw new ConfigException("durable_store.lease_seconds must be at least 5");
             }
         }
     }

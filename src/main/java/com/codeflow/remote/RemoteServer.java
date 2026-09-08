@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.codeflow.agent.Agent;
 import com.codeflow.agent.AgentEvent;
+import com.codeflow.agent.AgentRunHandle;
 import com.codeflow.command.Command;
 import com.codeflow.command.CommandContext;
 import com.codeflow.command.CommandRegistry;
@@ -12,6 +13,7 @@ import com.codeflow.compact.ContextCompactor;
 import com.codeflow.config.HookConfig;
 import com.codeflow.config.A2aAgentConfig;
 import com.codeflow.config.ContextPolicyConfig;
+import com.codeflow.config.DurableStoreConfig;
 import com.codeflow.config.McpServerConfig;
 import com.codeflow.config.ProviderConfig;
 import com.codeflow.conversation.ConversationManager;
@@ -20,6 +22,8 @@ import com.codeflow.hook.HookEngine;
 import com.codeflow.llm.LlmClient;
 import com.codeflow.mcp.McpManager;
 import com.codeflow.memory.MemoryManager;
+import com.codeflow.durable.DurableTask;
+import com.codeflow.durable.DurableTaskRepository;
 import com.codeflow.permission.PermissionChecker;
 import com.codeflow.permission.PermissionMode;
 import com.codeflow.permission.PermissionResponse;
@@ -37,6 +41,8 @@ import com.codeflow.tool.impl.AskUserTool;
 import com.codeflow.tool.impl.ToolSearchTool;
 import com.codeflow.tui.dialog.AskUserDialog;
 import com.codeflow.worktree.WorktreeManager;
+import com.codeflow.runtime.AgentRuntime;
+import com.codeflow.runtime.SkillRuntimeSupport;
 
 import io.javalin.Javalin;
 import io.javalin.websocket.WsContext;
@@ -61,6 +67,7 @@ public class RemoteServer {
     private final List<McpServerConfig> mcpConfigs;
     private final List<A2aAgentConfig> a2aAgents;
     private final ContextPolicyConfig contextPolicyConfig;
+    private final DurableStoreConfig durableStoreConfig;
     private final List<HookConfig> hookConfigs;
     private final String addr;
 
@@ -76,10 +83,14 @@ public class RemoteServer {
     private String sessionId;
     private FileHistory fileHistory;
     private PermissionChecker permChecker;
+    private AgentRuntime runtime;
+    private DurableTaskRepository durableStore;
+    private volatile String activeTaskId;
+    private WorktreeManager worktreeManager;
 
     // ── 流式状态 ──────────────────────────────────────────────────────
     private volatile boolean streaming;
-    private volatile Thread streamThread;
+    private volatile AgentRunHandle activeRun;
     private BlockingQueue<AgentEvent> agentQueue;
 
     // ── 权限和 ask_user 的待决响应 ────────────────────────────────────
@@ -108,12 +119,14 @@ public class RemoteServer {
 
     public RemoteServer(List<ProviderConfig> providers, List<McpServerConfig> mcpConfigs,
                         List<A2aAgentConfig> a2aAgents, ContextPolicyConfig contextPolicyConfig,
+                        DurableStoreConfig durableStoreConfig,
                         List<HookConfig> hookConfigs, String addr, boolean enableCoordinatorMode,
                         boolean forkDisabled) {
         this.providers = providers;
         this.mcpConfigs = mcpConfigs;
         this.a2aAgents = a2aAgents != null ? a2aAgents : List.of();
         this.contextPolicyConfig = contextPolicyConfig;
+        this.durableStoreConfig = durableStoreConfig;
         this.hookConfigs = hookConfigs;
         this.addr = addr;
         this.enableCoordinatorMode = enableCoordinatorMode;
@@ -154,6 +167,7 @@ public class RemoteServer {
                                 "type", "commands",
                                 "data", buildCommandList()
                         ));
+                        broadcastDurableTasks();
                     });
                     ws.onClose(ctx -> connections.remove(ctx));
                     ws.onMessage(ctx -> handleWsMessage(ctx, ctx.message()));
@@ -177,10 +191,11 @@ public class RemoteServer {
         // 记忆管理
         memoryManager = new MemoryManager(workDir);
         instructionsContent = MemoryManager.loadInstructions(workDir);
+        skillCatalog = SkillRuntimeSupport.load(workDir);
 
         // 构建系统提示词
         var env = PromptBuilder.detectEnvironment(providerCfg.getModel());
-        var options = new PromptBuilder.BuildOptions(null);
+        var options = new PromptBuilder.BuildOptions(skillCatalog.buildSection(workDir));
         String systemPrompt = PromptBuilder.buildSystemPrompt(env, options);
 
         // 创建 LLM 客户端
@@ -190,7 +205,8 @@ public class RemoteServer {
         // 工具注册
         registry = ToolRegistry.createDefault();
         registry.register(new ToolSearchTool(registry, protocol));
-        com.codeflow.AgentPlatform.registerDurableAndA2a(registry, workDir, a2aAgents);
+        durableStore = com.codeflow.AgentPlatform.registerDurableAndA2a(
+                registry, workDir, a2aAgents, durableStoreConfig);
 
         var exitPlanTool = new com.codeflow.tool.impl.ExitPlanModeTool();
         exitPlanTool.setIsPlanMode(() -> permChecker != null && permChecker.getMode() == PermissionMode.PLAN);
@@ -209,7 +225,7 @@ public class RemoteServer {
         registry.register(agentToolRef);
 
         // Worktree 工具
-        var worktreeManager = new WorktreeManager(workDir, List.of(), 720);
+        worktreeManager = new WorktreeManager(workDir, List.of(), 720);
         agentToolRef.setWorktreeManager(worktreeManager);
         sessionId = SessionManager.newId();
         registry.register(new com.codeflow.tool.impl.EnterWorktreeTool(worktreeManager, sessionId));
@@ -256,7 +272,6 @@ public class RemoteServer {
         agent = new Agent(client, registry, protocol, providerCfg);
         agent.setFileHistory(fileHistory);
         agent.setInstructions(instructionsContent);
-        agent.setMemoryContent(memoryContent);
         agent.setChecker(permChecker);
         agent.setWorkDir(workDir);
         agent.setSessionId(sessionId);
@@ -305,12 +320,16 @@ public class RemoteServer {
         }
         agent.setHookEngine(hookEngine);
 
-        // Skill 加载
-        skillCatalog = new SkillCatalog();
-        var skillDir = Path.of(workDir, ".codeflow", "skills");
-        if (Files.isDirectory(skillDir)) {
-            skillCatalog.loadFromDirectory(skillDir);
-        }
+        SkillRuntimeSupport.wire(skillCatalog, registry, () -> conversation, null,
+                name -> {
+                    client.setSystemPrompt(PromptBuilder.buildSystemPrompt(
+                            PromptBuilder.detectEnvironment(providerCfg.getModel()),
+                            new PromptBuilder.BuildOptions(skillCatalog.buildSection(workDir))));
+                    broadcast(Map.of("type", "commands", "data", buildCommandList()));
+                });
+
+        runtime = new AgentRuntime(agent, client, providerCfg, workDir, "remote",
+                memoryManager, durableStore, this::onDurableTaskChanged);
 
         // 命令注册
         cmdRegistry = new CommandRegistry();
@@ -391,9 +410,14 @@ public class RemoteServer {
                     }
                 }
                 case "cancel" -> {
-                    // 中断当前流式响应
-                    Thread t = streamThread;
-                    if (t != null) t.interrupt();
+                    cancelActiveRun("用户从 Remote UI 取消");
+                }
+                case "list_durable_tasks" -> broadcastDurableTasks();
+                case "resume_task" -> {
+                    if (data instanceof Map<?, ?> d) {
+                        String id = Objects.toString(d.get("id"), "");
+                        Thread.startVirtualThread(() -> handleDurableResume(id));
+                    }
                 }
                 case "ping" -> {
                     // 应用层保活：回复 pong
@@ -422,7 +446,6 @@ public class RemoteServer {
         }
 
         streaming = true;
-        streamThread = Thread.currentThread();
         String workDir = System.getProperty("user.dir");
         SessionManager.saveMessage(workDir, sessionId, "user", content);
         conversation.addUserMessage(content);
@@ -434,14 +457,14 @@ public class RemoteServer {
         }
 
         // 启动 Agent 并消费事件
-        agentQueue = agent.run(conversation);
+        startRuntimeRun(content, null);
         if (askUserTool != null) askUserTool.setEventQueue(agentQueue);
 
         try {
             consumeAgentEvents();
         } finally {
             streaming = false;
-            streamThread = null;
+            activeRun = null;
             agentQueue = null;
         }
     }
@@ -465,6 +488,16 @@ public class RemoteServer {
             }
 
             if (name.isEmpty()) return;
+
+            if ("tasks".equals(name)) {
+                broadcastDurableTasks();
+                broadcast(Map.of("type", "command_done"));
+                return;
+            }
+            if ("resume-task".equals(name)) {
+                Thread.startVirtualThread(() -> handleDurableResume(args));
+                return;
+            }
 
             var cmd = cmdRegistry.find(name);
             if (cmd.isEmpty()) {
@@ -514,7 +547,6 @@ public class RemoteServer {
 
                     // PROMPT 命令生成 prompt 注入给 Agent
                     streaming = true;
-                    streamThread = Thread.currentThread();
                     String workDir = System.getProperty("user.dir");
                     SessionManager.saveMessage(workDir, sessionId, "user", displayText);
                     conversation.addUserMessage(prompt);
@@ -524,14 +556,14 @@ public class RemoteServer {
                         mcpInstructions = "";
                     }
 
-                    agentQueue = agent.run(conversation);
+                    startRuntimeRun(prompt, null);
                     if (askUserTool != null) askUserTool.setEventQueue(agentQueue);
 
                     try {
                         consumeAgentEvents();
                     } finally {
                         streaming = false;
-                        streamThread = null;
+                        activeRun = null;
                         agentQueue = null;
                     }
                 }
@@ -610,18 +642,17 @@ public class RemoteServer {
         // 带参数直接发给 Agent
         if (args != null && !args.isEmpty()) {
             streaming = true;
-            streamThread = Thread.currentThread();
             SessionManager.saveMessage(workDir, sessionId, "user", "/plan " + args);
             conversation.addUserMessage(args);
 
-            agentQueue = agent.run(conversation);
+            startRuntimeRun(args, null);
             if (askUserTool != null) askUserTool.setEventQueue(agentQueue);
 
             try {
                 consumeAgentEvents();
             } finally {
                 streaming = false;
-                streamThread = null;
+                activeRun = null;
                 agentQueue = null;
             }
         }
@@ -843,8 +874,129 @@ public class RemoteServer {
                             "waitMs", e.waitMs()
                     )));
                 }
+                case AgentEvent.CanceledEvent e -> {
+                    broadcast(Map.of("type", "canceled", "data", Map.of("reason", e.reason())));
+                }
             }
         }
+    }
+
+    private void cancelActiveRun(String reason) {
+        AgentRunHandle handle = activeRun;
+        if (handle == null) return;
+        pendingPerms.values().forEach(future -> future.complete(PermissionResponse.DENY));
+        pendingPerms.clear();
+        pendingAsks.values().forEach(future -> future.complete(Map.of()));
+        pendingAsks.clear();
+        handle.cancel(reason);
+    }
+
+    private void startRuntimeRun(String prompt, String resumeTaskId) {
+        AgentRuntime.StartOptions options = resumeTaskId == null
+                ? AgentRuntime.StartOptions.interactive(prompt, sessionId, "remote")
+                : new AgentRuntime.StartOptions(prompt, sessionId, true, resumeTaskId,
+                        "remote-" + ProcessHandle.current().pid() + "-"
+                                + UUID.randomUUID().toString().substring(0, 8));
+        var run = runtime.start(conversation, options);
+        activeRun = run.handle();
+        activeTaskId = run.durableTaskId();
+        agentQueue = run.handle().events();
+        if (askUserTool != null) askUserTool.setEventQueue(agentQueue);
+    }
+
+    private void handleDurableResume(String taskId) {
+        if (streaming) {
+            broadcast(Map.of("type", "error", "data", Map.of("message", "当前任务仍在运行，无法恢复其他任务。")));
+            broadcast(Map.of("type", "command_done"));
+            return;
+        }
+        if (taskId == null || taskId.isBlank()) {
+            broadcastDurableTasks();
+            broadcast(Map.of("type", "command_done"));
+            return;
+        }
+        try {
+            var restored = runtime.restore(taskId.strip());
+            conversation = restored.conversation();
+            sessionId = restored.task().getSessionId();
+            agent.setSessionId(sessionId);
+            fileHistory = new FileHistory(System.getProperty("user.dir"), sessionId);
+            agent.setFileHistory(fileHistory);
+            wireFileHistory();
+            registry.register(new com.codeflow.tool.impl.EnterWorktreeTool(worktreeManager, sessionId));
+
+            broadcast(Map.of("type", "clear"));
+            for (var message : SessionManager.loadSession(System.getProperty("user.dir"), sessionId)) {
+                if ("user".equals(message.role())) {
+                    broadcast(Map.of("type", "replay_user", "data", Map.of(
+                            "content", Objects.toString(message.content(), ""))));
+                } else if ("assistant".equals(message.role())) {
+                    broadcast(Map.of("type", "replay_assistant", "data", Map.of(
+                            "content", Objects.toString(message.content(), ""))));
+                }
+            }
+            broadcast(Map.of("type", "system", "data", Map.of(
+                    "message", "正在从检查点恢复任务 " + taskId + "。")));
+
+            streaming = true;
+            startRuntimeRun(restored.task().getPrompt(), taskId.strip());
+            try {
+                consumeAgentEvents();
+            } finally {
+                streaming = false;
+                activeRun = null;
+                agentQueue = null;
+                activeTaskId = null;
+                broadcastDurableTasks();
+            }
+        } catch (Exception e) {
+            broadcast(Map.of("type", "error", "data", Map.of(
+                    "message", "恢复任务失败：" + e.getMessage())));
+        } finally {
+            broadcast(Map.of("type", "command_done"));
+        }
+    }
+
+    private void wireFileHistory() {
+        var cache = new com.codeflow.tool.FileStateCache();
+        for (var tool : registry.listTools()) {
+            if (tool instanceof com.codeflow.tool.impl.EditFileTool edit) {
+                edit.setFileHistory(fileHistory);
+                edit.setFileStateCache(cache);
+            }
+            if (tool instanceof com.codeflow.tool.impl.WriteFileTool write) {
+                write.setFileHistory(fileHistory);
+                write.setFileStateCache(cache);
+            }
+            if (tool instanceof com.codeflow.tool.impl.ReadFileTool read) {
+                read.setFileStateCache(cache);
+            }
+        }
+    }
+
+    private void onDurableTaskChanged(DurableTask task) {
+        activeTaskId = task.getId();
+        var data = new LinkedHashMap<String, Object>();
+        data.put("id", task.getId());
+        data.put("state", task.getState().name());
+        data.put("attempt", task.getAttempt());
+        data.put("version", task.getVersion());
+        data.put("updatedAt", task.getUpdatedAt());
+        if (task.getLastError() != null) data.put("lastError", task.getLastError());
+        broadcast(Map.of("type", "durable_task", "data", data));
+    }
+
+    private void broadcastDurableTasks() {
+        if (runtime == null) return;
+        var tasks = runtime.recoverableTasks().stream().map(task -> {
+            var item = new LinkedHashMap<String, Object>();
+            item.put("id", task.getId());
+            item.put("state", task.getState().name());
+            item.put("prompt", task.getPrompt());
+            item.put("updatedAt", task.getUpdatedAt());
+            return item;
+        }).toList();
+        broadcast(Map.of("type", "durable_tasks", "data", tasks));
     }
 
     // ────────────────────────────────────────────────────────────────────
@@ -884,6 +1036,8 @@ public class RemoteServer {
                     "description", cmd.description()
             ));
         }
+        list.add(Map.of("name", "tasks", "description", "查看可恢复的持久任务"));
+        list.add(Map.of("name", "resume-task", "description", "从检查点恢复任务：/resume-task <id>"));
         return list;
     }
 

@@ -11,6 +11,7 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -18,13 +19,16 @@ class A2aClientTest {
     private HttpServer server;
     private String baseUrl;
     private final AtomicInteger polls = new AtomicInteger();
+    private final AtomicReference<String> traceparent = new AtomicReference<>();
 
     @BeforeEach
     void startServer() throws Exception {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         int port = server.getAddress().getPort();
         baseUrl = "http://127.0.0.1:" + port;
-        server.createContext("/.well-known/agent-card.json", exchange -> respond(exchange, 200, """
+        server.createContext("/.well-known/agent-card.json", exchange -> {
+            captureTraceparent(exchange);
+            respond(exchange, 200, """
                 {
                   "name":"Python Static Analysis Agent",
                   "description":"Cross-language test agent",
@@ -34,11 +38,16 @@ class A2aClientTest {
                   ],
                   "skills":[{"id":"static-analysis","name":"Static analysis","description":"Finds risks","tags":["code"]}]
                 }
-                """.formatted(baseUrl)));
-        server.createContext("/a2a/v1/message:send", exchange -> respond(exchange, 200, """
+                """.formatted(baseUrl));
+        });
+        server.createContext("/a2a/v1/message:send", exchange -> {
+            captureTraceparent(exchange);
+            respond(exchange, 200, """
                 {"task":{"id":"task-1","contextId":"ctx-1","status":{"state":"TASK_STATE_WORKING"},"artifacts":[]}}
-                """));
+                """);
+        });
         server.createContext("/a2a/v1/tasks/task-1", exchange -> {
+            captureTraceparent(exchange);
             polls.incrementAndGet();
             respond(exchange, 200, """
                     {"id":"task-1","contextId":"ctx-1","status":{"state":"TASK_STATE_COMPLETED","message":{"parts":[{"text":"analysis complete"}]}},"artifacts":[{"artifactId":"a-1","name":"report","parts":[{"text":"no critical findings","mediaType":"text/plain"}]}]}
@@ -70,6 +79,14 @@ class A2aClientTest {
         assertEquals("analysis complete", result.message());
         assertEquals("no critical findings", result.artifacts().getFirst().parts().getFirst().text());
         assertTrue(polls.get() >= 1);
+        assertNotNull(traceparent.get());
+        assertTrue(traceparent.get().matches("00-(?!0{32})[0-9a-f]{32}-(?!0{16})[0-9a-f]{16}-[0-9a-f]{2}"),
+                "A2A requests must carry a valid W3C traceparent header, actual=" + traceparent.get());
+    }
+
+    private void captureTraceparent(HttpExchange exchange) {
+        String header = exchange.getRequestHeaders().getFirst("traceparent");
+        if (header != null) traceparent.set(header);
     }
 
     private static void respond(HttpExchange exchange, int status, String body) throws IOException {

@@ -40,6 +40,21 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 }
 #status-bar .brand { color: var(--accent); font-weight: 700; font-size: 15px; letter-spacing: 0.2px; }
 #status-bar .info { display: flex; gap: 16px; }
+.task-chip {
+  border: 1px solid var(--border); border-radius: 999px; padding: 3px 9px;
+  color: var(--text-dim); background: #f8fafc; font-family: 'Cascadia Code', Consolas, monospace;
+}
+#recovery-panel {
+  display: none; padding: 10px 18px; border-bottom: 1px solid var(--border);
+  background: #f8fafc; gap: 8px; align-items: center; flex-wrap: wrap;
+}
+#recovery-panel.show { display: flex; }
+.recovery-title { color: var(--text-bright); font-weight: 600; margin-right: 4px; }
+.recovery-task {
+  border: 1px solid #c7d2fe; background: #eef2ff; color: #3730a3;
+  border-radius: 6px; padding: 5px 9px; cursor: pointer; font-family: inherit;
+}
+.recovery-task:hover { background: #e0e7ff; }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
 .dot.connected { background: var(--green); }
 .dot.disconnected { background: var(--red); }
@@ -171,6 +186,11 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 }
 #send-btn:hover { opacity: 0.9; }
 #send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+#cancel-btn {
+  display: none; background: #fff; color: var(--red); border: 1px solid #fecaca;
+  border-radius: 6px; padding: 10px 14px; cursor: pointer; font-family: inherit;
+}
+#cancel-btn.show { display: inline-block; }
 
 /* 流式光标闪烁 */
 .cursor { animation: blink 1s step-end infinite; }
@@ -199,14 +219,17 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
   <div id="status-bar">
     <span class="brand">⚡ CodeFlow 远程工作台</span>
     <div class="info">
+      <span id="task-status" class="task-chip">暂无任务</span>
       <span id="conn-status"><span class="dot disconnected"></span>连接中...</span>
       <span id="token-info"></span>
     </div>
   </div>
+  <div id="recovery-panel"></div>
   <div id="messages"></div>
   <div id="input-area" style="position:relative;">
     <div id="slash-menu"></div>
     <textarea id="input" placeholder="输入研发任务…（Enter 发送，Shift+Enter 换行）" rows="1"></textarea>
+    <button id="cancel-btn">停止</button>
     <button id="send-btn">发送</button>
   </div>
 </div>
@@ -216,9 +239,12 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 const messagesEl = document.getElementById('messages');
 const inputEl = document.getElementById('input');
 const sendBtn = document.getElementById('send-btn');
+const cancelBtn = document.getElementById('cancel-btn');
 const connStatus = document.getElementById('conn-status');
 const tokenInfo = document.getElementById('token-info');
 const slashMenu = document.getElementById('slash-menu');
+const taskStatus = document.getElementById('task-status');
+const recoveryPanel = document.getElementById('recovery-panel');
 
 let ws = null;
 let streaming = false;
@@ -405,7 +431,59 @@ function handleMessage(msg) {
     case 'retry':
       addSystem('↻ 正在重试：' + msg.data.reason);
       break;
+
+    case 'canceled':
+      addSystem('已停止当前任务：' + msg.data.reason);
+      streaming = false;
+      updateUI();
+      break;
+
+    case 'durable_task':
+      updateDurableTask(msg.data);
+      break;
+
+    case 'durable_tasks':
+      renderRecoverableTasks(msg.data || []);
+      break;
   }
+}
+
+const stateLabels = {
+  CREATED: '已创建', PLANNING: '规划中', EXECUTING: '执行中', VERIFYING: '验证中',
+  FAILED_RETRYABLE: '可恢复失败', WAITING_APPROVAL: '等待授权', PAUSED: '已暂停',
+  COMPLETED: '已完成', FAILED: '失败', CANCELED: '已取消'
+};
+
+function updateDurableTask(task) {
+  const shortId = task.id ? task.id.substring(0, 11) : '';
+  taskStatus.textContent = (stateLabels[task.state] || task.state) + (shortId ? ' · ' + shortId : '');
+  taskStatus.title = task.id || '';
+}
+
+function renderRecoverableTasks(tasks) {
+  if (!tasks.length) {
+    recoveryPanel.classList.remove('show');
+    recoveryPanel.innerHTML = '';
+    return;
+  }
+  recoveryPanel.innerHTML = '<span class="recovery-title">检测到可恢复任务</span>' +
+    tasks.slice(0, 5).map(task => {
+      const prompt = (task.prompt || '').replace(/\s+/g, ' ').slice(0, 34);
+      return '<button class="recovery-task" data-task-id="' + escapeHtml(task.id) +
+        '" title="' + escapeHtml(task.prompt || '') + '">' +
+        escapeHtml((stateLabels[task.state] || task.state) + ' · ' + prompt) + '</button>';
+    }).join('');
+  recoveryPanel.classList.add('show');
+  recoveryPanel.querySelectorAll('.recovery-task').forEach(button => {
+    button.addEventListener('click', () => resumeDurableTask(button.dataset.taskId));
+  });
+}
+
+function resumeDurableTask(id) {
+  if (streaming || !ws || ws.readyState !== WebSocket.OPEN) return;
+  streaming = true;
+  updateUI();
+  ws.send(JSON.stringify({ type: 'resume_task', data: { id } }));
 }
 
 function formatTokens(n) {
@@ -699,6 +777,7 @@ function sendMessage() {
 function updateUI() {
   sendBtn.disabled = streaming;
   inputEl.disabled = streaming;
+  cancelBtn.classList.toggle('show', streaming);
   if (!streaming) inputEl.focus();
 }
 
@@ -797,6 +876,11 @@ inputEl.addEventListener('input', () => {
 });
 
 sendBtn.addEventListener('click', sendMessage);
+cancelBtn.addEventListener('click', () => {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'cancel', data: {} }));
+  }
+});
 
 // 启动
 connect();

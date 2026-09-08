@@ -69,6 +69,11 @@ public final class TraceRecorder implements Consumer<AgentEvent> {
             case AgentEvent.CompactEvent ignored -> trace.setCompactions(trace.getCompactions() + 1);
             case AgentEvent.RetryEvent value -> trace.getRetries().add(value.reason());
             case AgentEvent.ErrorEvent value -> trace.getErrors().add(value.message());
+            case AgentEvent.CanceledEvent value -> {
+                trace.getMetadata().put("canceled", true);
+                trace.getMetadata().put("cancelReason", value.reason());
+                finish(0);
+            }
             case AgentEvent.LoopComplete value -> finish(value.totalTurns());
             default -> { }
         }

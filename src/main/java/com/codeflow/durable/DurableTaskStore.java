@@ -23,7 +23,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * Crash-safe durable task store. Snapshots are atomically replaced while an
  * append-only JSONL event log preserves the transition audit trail.
  */
-public final class DurableTaskStore {
+public final class DurableTaskStore implements DurableTaskRepository {
     private static final ObjectMapper MAPPER = new ObjectMapper()
             .enable(SerializationFeature.INDENT_OUTPUT);
     private static final SecureRandom RNG = new SecureRandom();

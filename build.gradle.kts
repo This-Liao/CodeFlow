@@ -18,6 +18,14 @@ repositories {
 }
 
 dependencies {
+    // OpenTelemetry API/SDK + OTLP HTTP exporter. The BOM keeps all OTel
+    // artifacts on one compatible stable release.
+    implementation(platform("io.opentelemetry:opentelemetry-bom:1.65.0"))
+    implementation("io.opentelemetry:opentelemetry-api")
+    implementation("io.opentelemetry:opentelemetry-sdk")
+    implementation("io.opentelemetry:opentelemetry-exporter-otlp")
+    implementation("org.postgresql:postgresql:42.7.13")
+
     // 终端 I/O（TUI 框架的底层驱动）
     implementation("org.jline:jline:3.28.0")
 

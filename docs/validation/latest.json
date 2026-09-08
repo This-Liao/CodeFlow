@@ -1,31 +1,33 @@
 {
-  "timestampUtc": "2026-08-28T07:23:26+00:00",
+  "timestampUtc": "2026-09-08T05:37:57+00:00",
   "result": "PASS",
   "gradle": {
     "result": "PASS",
     "tests": {
-      "tests": 205,
+      "tests": 215,
       "failures": 0,
       "errors": 0,
-      "skipped": 2,
-      "passed": 203
+      "skipped": 3,
+      "passed": 212
     },
-    "jarBytes": 86903052
+    "jarBytes": 89895623
   },
   "a2a": {
     "agent": "CodeFlow Python Static Analysis Agent",
     "protocolVersion": "1.0",
     "protocolBinding": "HTTP+JSON",
-    "taskId": "717465da-a712-4c8b-84e0-1b1f5fbcc515",
+    "taskId": "a84770e6-5719-4160-907a-35832565eaa4",
     "state": "TASK_STATE_COMPLETED",
     "artifacts": 1,
-    "scannedJavaFiles": 194,
-    "findings": 48,
-    "durationMs": 324
+    "scannedJavaFiles": 210,
+    "findings": 49,
+    "durationMs": 323,
+    "traceId": "0affb88f875df1a6fe77e41fa51b6a89",
+    "traceCorrelated": true
   },
   "durableRecovery": {
     "result": "PASS",
-    "taskId": "cf-dd646f3b1cb17bab",
+    "taskId": "cf-da6e54158a26bfa8",
     "recoveredFrom": "EXECUTING",
     "checkpointStep": "edit-recovery-fixture",
     "reusedCheckpoint": true,
@@ -35,7 +37,7 @@
     "eventCount": 8,
     "artifacts": 1,
     "finalState": "COMPLETED",
-    "recoveryDurationMs": 125,
+    "recoveryDurationMs": 139,
     "forcedExitCode": 1,
     "checkpointVersion": 4
   },
@@ -56,7 +58,7 @@
         "schemaReductionPct": 0.0,
         "toolSearchCalls": 0,
         "toolErrors": 0,
-        "p95SelectionMicros": 272
+        "p95SelectionMicros": 341
       },
       {
         "name": "deferred-tool",
@@ -69,10 +71,10 @@
         "schemaReductionPct": 65.1,
         "toolSearchCalls": 5,
         "toolErrors": 0,
-        "p95SelectionMicros": 80
+        "p95SelectionMicros": 68
       },
       {
-        "name": "context-policy",
+        "name": "context-lexical",
         "successRate": 100.0,
         "stageAccuracy": 100.0,
         "initialToolRecall": 84.6,
@@ -82,13 +84,39 @@
         "schemaReductionPct": 75.7,
         "toolSearchCalls": 6,
         "toolErrors": 0,
-        "p95SelectionMicros": 1084
+        "p95SelectionMicros": 830
+      },
+      {
+        "name": "context-vector",
+        "successRate": 100.0,
+        "stageAccuracy": 100.0,
+        "initialToolRecall": 84.6,
+        "averageInitialToolSchemas": 12.0,
+        "averageSchemaChars": 13050.8,
+        "estimatedInputTokens": 3263,
+        "schemaReductionPct": 75.5,
+        "toolSearchCalls": 6,
+        "toolErrors": 0,
+        "p95SelectionMicros": 2175
+      },
+      {
+        "name": "context-hybrid",
+        "successRate": 100.0,
+        "stageAccuracy": 100.0,
+        "initialToolRecall": 84.6,
+        "averageInitialToolSchemas": 12.0,
+        "averageSchemaChars": 13048.8,
+        "estimatedInputTokens": 3262,
+        "schemaReductionPct": 75.5,
+        "toolSearchCalls": 6,
+        "toolErrors": 0,
+        "p95SelectionMicros": 1124
       }
     ]
   },
   "environment": {
     "os": "Windows 11 (AMD64)",
-    "python": "3.12.13",
+    "python": "3.12.14",
     "java": "java version \"22.0.2\" 2024-07-16"
   }
 }

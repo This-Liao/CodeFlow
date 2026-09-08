@@ -3,6 +3,8 @@ package com.codeflow.a2a;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.codeflow.config.A2aAgentConfig;
+import com.codeflow.observability.Telemetry;
+import io.opentelemetry.api.trace.SpanKind;
 
 import java.time.Duration;
 import java.util.regex.Matcher;
@@ -21,6 +23,9 @@ public final class A2aValidationMain {
                 : "http://127.0.0.1:8001/.well-known/agent-card.json";
         String prompt = args.length > 1 ? args[1]
                 : "Analyze the CodeFlow Java sources for reliability risks.";
+        try (Telemetry.SpanScope validation = Telemetry.startSpan(
+                "codeflow.a2a.validation", SpanKind.INTERNAL)) {
+        String localTraceId = Telemetry.currentTraceId();
 
         A2aAgentConfig config = new A2aAgentConfig();
         config.setName("engineering-validation");
@@ -43,12 +48,18 @@ public final class A2aValidationMain {
         A2aTaskResult result = client.delegate(prompt);
         System.out.printf("      task     : %s%n", result.taskId());
         System.out.printf("      state    : %s%n", result.state());
+        String traceId = result.raw().path("metadata").path("traceId").asText();
+        System.out.printf("      trace id : %s%n", traceId.isBlank() ? "(remote did not report one)" : traceId);
 
         if (!"TASK_STATE_COMPLETED".equals(result.state())) {
             throw new IllegalStateException("A2A task did not complete: " + result.state() + " " + result.message());
         }
         if (result.artifacts().isEmpty()) {
             throw new IllegalStateException("A2A task completed without artifacts");
+        }
+        if (!localTraceId.equals(traceId)) {
+            throw new IllegalStateException("A2A trace correlation failed: Java="
+                    + localTraceId + ", Python=" + traceId);
         }
 
         int scannedFiles = -1;
@@ -86,6 +97,9 @@ public final class A2aValidationMain {
         summary.put("scannedJavaFiles", scannedFiles);
         summary.put("findings", findings);
         summary.put("durationMs", durationMs);
+        summary.put("traceId", traceId);
+        summary.put("traceCorrelated", true);
         System.out.println("CODEFLOW_VALIDATION_JSON=" + MAPPER.writeValueAsString(summary));
+        }
     }
 }

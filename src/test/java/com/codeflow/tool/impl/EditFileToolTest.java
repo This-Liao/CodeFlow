@@ -45,4 +45,35 @@ class EditFileToolTest {
         ));
         assertTrue(result.isError());
     }
+
+    @Test
+    void editsCrLfFileWithLfModelTextWithoutChangingLineEndings(@TempDir Path tempDir) throws IOException {
+        Path file = tempDir.resolve("retry_policy.py");
+        Files.writeString(file, "def delay(attempt):\r\n    return 100\r\n");
+
+        var result = new EditFileTool().execute(Map.of(
+                "file_path", file.toString(),
+                "old_string", "def delay(attempt):\n    return 100",
+                "new_string", "def delay(attempt):\n    return min(100 * 2 ** (attempt - 1), 800)"
+        ));
+
+        assertFalse(result.isError(), result.output());
+        assertEquals("def delay(attempt):\r\n    return min(100 * 2 ** (attempt - 1), 800)\r\n",
+                Files.readString(file));
+    }
+
+    @Test
+    void editsLfFileWithCrLfModelText(@TempDir Path tempDir) throws IOException {
+        Path file = tempDir.resolve("policy.py");
+        Files.writeString(file, "def value():\n    return 1\n");
+
+        var result = new EditFileTool().execute(Map.of(
+                "file_path", file.toString(),
+                "old_string", "def value():\r\n    return 1",
+                "new_string", "def value():\r\n    return 2"
+        ));
+
+        assertFalse(result.isError(), result.output());
+        assertEquals("def value():\n    return 2\n", Files.readString(file));
+    }
 }

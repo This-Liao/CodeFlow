@@ -3,6 +3,7 @@ package com.codeflow.tui;
 
 import com.codeflow.agent.Agent;
 import com.codeflow.agent.AgentEvent;
+import com.codeflow.agent.AgentRunHandle;
 import com.codeflow.command.CommandRegistry;
 import com.codeflow.config.HookConfig;
 import com.codeflow.config.A2aAgentConfig;
@@ -16,7 +17,6 @@ import com.codeflow.llm.LlmClient;
 import com.codeflow.mcp.McpManager;
 import com.codeflow.memory.MemoryConsolidator;
 import com.codeflow.memory.MemoryManager;
-import com.codeflow.memory.MemoryRecall;
 import com.codeflow.permission.PermissionChecker;
 import com.codeflow.permission.PermissionMode;
 import com.codeflow.permission.PermissionResponse;
@@ -24,6 +24,8 @@ import com.codeflow.prompt.PlanModePrompt;
 import com.codeflow.prompt.PromptBuilder;
 import com.codeflow.session.SessionManager;
 import com.codeflow.skill.SkillCatalog;
+import com.codeflow.runtime.AgentRuntime;
+import com.codeflow.runtime.SkillRuntimeSupport;
 import com.codeflow.plan.PlanFile;
 import com.codeflow.subagent.AgentTool;
 import com.codeflow.subagent.SubAgentProgress;
@@ -103,6 +105,7 @@ public class CodeFlowModel implements Model {
 
     // ── Streaming infrastructure ─────────────────────────────────────────
     private BlockingQueue<AgentEvent> agentQueue;
+    private AgentRunHandle activeRun;
     private CompletableFuture<PermissionResponse> pendingPermission;
     private boolean permDialog;
     private String permToolName;
@@ -135,7 +138,8 @@ public class CodeFlowModel implements Model {
     private SkillCatalog skillCatalog;
     private TaskList taskList;
     private MemoryManager memoryManager;
-    private MemoryConsolidator memoryConsolidator;
+    private AgentRuntime runtime;
+    private com.codeflow.durable.DurableTaskRepository durableStore;
     private String instructionsContent = "";
     private String memoryContentField = "";
 
@@ -195,6 +199,7 @@ public class CodeFlowModel implements Model {
     private volatile String mcpServerInfo = "";
     private final List<A2aAgentConfig> a2aAgents;
     private final ContextPolicyConfig contextPolicyConfig;
+    private final com.codeflow.config.DurableStoreConfig durableStoreConfig;
 
     // ── Ready gate (等待首次 WindowSizeMessage 后再渲染) ──────────────
     private boolean ready;
@@ -225,12 +230,14 @@ public class CodeFlowModel implements Model {
 
     public CodeFlowModel(List<ProviderConfig> providers, List<McpServerConfig> mcpServers,
                         List<A2aAgentConfig> a2aAgents, ContextPolicyConfig contextPolicyConfig,
+                        com.codeflow.config.DurableStoreConfig durableStoreConfig,
                         List<HookConfig> hookConfigs, boolean enableCoordinatorMode,
                         boolean forkDisabled) {
         this.providers = providers != null ? providers : List.of();
         this.mcpServers = mcpServers != null ? mcpServers : List.of();
         this.a2aAgents = a2aAgents != null ? a2aAgents : List.of();
         this.contextPolicyConfig = contextPolicyConfig;
+        this.durableStoreConfig = durableStoreConfig;
         this.hookConfigs = hookConfigs != null ? hookConfigs : List.of();
         this.enableCoordinatorMode = enableCoordinatorMode;
         this.forkDisabled = forkDisabled;
@@ -416,7 +423,11 @@ public class CodeFlowModel implements Model {
             thinkingVerb = SpinnerVerbs.random();
             streamBuf.setLength(0);
             toolBlocks.clear();
-            agentQueue = agent.run(conversation);
+            var runtimeRun = runtime.start(conversation,
+                    new AgentRuntime.StartOptions("后台任务通知", sessionId,
+                            false, null, "tui"));
+            activeRun = runtimeRun.handle();
+            agentQueue = activeRun.events();
             var pollCmd = Command.tick(POLL_INTERVAL, t -> new AgentEventMessage());
             return UpdateResult.from(this, pollCmd);
         }
@@ -495,7 +506,8 @@ public class CodeFlowModel implements Model {
             String workDir = System.getProperty("user.dir");
 
             memoryManager = new MemoryManager(workDir);
-            memoryConsolidator = new MemoryConsolidator(workDir);
+            skillCatalog = SkillRuntimeSupport.load(workDir);
+            sessionId = com.codeflow.session.SessionManager.newId();
 
             var env = PromptBuilder.detectEnvironment(selectedProvider.getModel());
             instructionsContent = MemoryManager.loadInstructions(workDir);
@@ -508,7 +520,8 @@ public class CodeFlowModel implements Model {
             registry = ToolRegistry.createDefault();
 
             registry.register(new ToolSearchTool(registry, protocol));
-            com.codeflow.AgentPlatform.registerDurableAndA2a(registry, workDir, a2aAgents);
+            durableStore = com.codeflow.AgentPlatform.registerDurableAndA2a(
+                    registry, workDir, a2aAgents, durableStoreConfig);
             var exitPlanTool = new com.codeflow.tool.impl.ExitPlanModeTool();
             exitPlanTool.setIsPlanMode(() -> permChecker != null && permChecker.getMode() == PermissionMode.PLAN);
             exitPlanTool.setPlanExists(() -> com.codeflow.plan.PlanFile.planExists());
@@ -569,7 +582,6 @@ public class CodeFlowModel implements Model {
                 }
             }
 
-            sessionId = com.codeflow.session.SessionManager.newId();
             // 启动时清理超过 30 天的过期 session 文件
             com.codeflow.session.SessionManager.cleanExpiredSessions(workDir);
             fileHistory = new com.codeflow.filehistory.FileHistory(workDir, sessionId);
@@ -659,33 +671,19 @@ public class CodeFlowModel implements Model {
                 });
             }
 
-            skillCatalog = SkillCatalog.loadCatalog(workDir);
-
-            // InstallSkill 工具：从 URL 下载并安装 skill
-            var installSkillTool = new com.codeflow.tool.impl.InstallSkillTool();
-            installSkillTool.setCatalog(skillCatalog);
-            installSkillTool.setOnInstalled(name -> {
+            SkillRuntimeSupport.wire(skillCatalog, registry, () -> conversation,
+                    new SkillForkHostImpl(), name -> {
                 registerSkillCommand(name);
                 if (client != null) {
                     client.setSystemPrompt(rebuildSystemPrompt(System.getProperty("user.dir")));
                 }
             });
-            registry.register(installSkillTool);
-
-            // LoadSkill 工具：按名称激活 skill，注入完整 SOP 到对话上下文
-            var loadSkillTool = new com.codeflow.tool.impl.LoadSkillTool();
-            loadSkillTool.setCatalog(skillCatalog);
-            loadSkillTool.setOnActivate((name, body) -> {
-                if (conversation != null) {
-                    conversation.addSystemReminder("<skill-name>" + name + "</skill-name>\n" + body);
-                }
-            });
-            loadSkillTool.setForkHost(new SkillForkHostImpl());
-            registry.register(loadSkillTool);
 
             wireSkillsToAgent();
 
             agent.setHookEngine(hookEngine);
+            runtime = new AgentRuntime(agent, client, selectedProvider, workDir, "tui",
+                    memoryManager, durableStore, ignored -> { });
             fireHook(HookEngine.EventName.SESSION_START, null, null);
 
         } catch (Exception e) {
@@ -1342,7 +1340,11 @@ public class CodeFlowModel implements Model {
                 fireHook(HookEngine.EventName.TURN_START, null, null);
 
                 try {
-                    agentQueue = agent.run(conversation);
+                    var runtimeRun = runtime.start(conversation,
+                            AgentRuntime.StartOptions.interactive(
+                                    prompt == null ? displayText : prompt, sessionId, "tui"));
+                    activeRun = runtimeRun.handle();
+                    agentQueue = activeRun.events();
                     if (askUserTool != null) askUserTool.setEventQueue(agentQueue);
                 } catch (Exception e) {
                     streaming = false;
@@ -1474,10 +1476,6 @@ public class CodeFlowModel implements Model {
             return UpdateResult.from(this);
         }
 
-        if (conversation.getMessages().isEmpty() && memoryManager != null) {
-            memoryManager.injectMemories(conversation);
-        }
-
         chatMessages.add(new ChatMessage("user", userText));
         // 用户消息立即提交到 scrollback
         String userLine = Styles.prompt.render("❯ ") + Styles.userText.render(userText) + "\n";
@@ -1493,9 +1491,6 @@ public class CodeFlowModel implements Model {
             conversation.addSystemReminder(mcpInstructions);
             mcpInstructionsOk = true;
         }
-
-        // Start memory recall prefetch — runs in a virtual thread with 8s timeout.
-        var prefetchFuture = prefetchRelevantMemories(userText);
 
         if (agent == null) {
             chatMessages.add(new ChatMessage("error", "No agent configured."));
@@ -1514,18 +1509,9 @@ public class CodeFlowModel implements Model {
         agentQueue = queue;
         if (askUserTool != null) askUserTool.setEventQueue(queue);
 
-        // 非阻塞 memory recall：prefetch future 传给 agent，工具执行后注入
-        // 不再同步等待，避免阻塞 TUI 渲染
-        agent.setMemoryRecallFuture(prefetchFuture);
-
-        Thread.startVirtualThread(() -> {
-            try {
-                agent.run(conversation, queue);
-            } catch (Exception e) {
-                queue.offer(new com.codeflow.agent.AgentEvent.ErrorEvent(
-                        "Agent error: " + e.getMessage()));
-            }
-        });
+        var runtimeRun = runtime.start(conversation,
+                AgentRuntime.StartOptions.interactive(userText, sessionId, "tui"), queue);
+        activeRun = runtimeRun.handle();
 
         Command pollCmd = Command.tick(POLL_INTERVAL, t -> new AgentEventMessage());
         return UpdateResult.from(this, Command.batch(Command.println(userLine), pollCmd));
@@ -1626,6 +1612,11 @@ public class CodeFlowModel implements Model {
                     if (e.waitMs() > 0) msg += " (waiting %dms)".formatted(e.waitMs());
                     chatMessages.add(new ChatMessage("system", msg));
                 }
+                case AgentEvent.CanceledEvent e -> {
+                    chatMessages.add(new ChatMessage("system", "已取消：" + e.reason()));
+                    needsCommit = true;
+                    loopDone = true;
+                }
                 case AgentEvent.PermissionRequestEvent e -> {
                     permDialog = true;
                     permToolName = e.toolName();
@@ -1653,9 +1644,8 @@ public class CodeFlowModel implements Model {
             if (loopDone) {
                 streaming = false;
                 agentQueue = null;
+                activeRun = null;
                 drainTaskNotifications();
-                triggerMemoryExtraction();
-                triggerMemoryConsolidation();
                 if (permChecker != null && permChecker.getMode() == PermissionMode.PLAN) {
                     planApprovalDialog.activate();
                 }
@@ -1691,90 +1681,7 @@ public class CodeFlowModel implements Model {
         return sb.toString();
     }
 
-    private void triggerMemoryExtraction() {
-        if (memoryManager == null || client == null) return;
-        if (!memoryManager.shouldExtract()) return;
-        Thread.startVirtualThread(() -> memoryManager.extract(client, conversation));
-    }
-
-    private void triggerMemoryConsolidation() {
-        if (memoryConsolidator == null || client == null) return;
-        memoryConsolidator.maybeRun(client, conversation, selectedProvider != null ? selectedProvider.getProtocol() : "anthropic");
-    }
-
     // ────────────────────────────────────────────────────────────────────
-    // Memory recall prefetch
-    // ────────────────────────────────────────────────────────────────────
-
-    /**
-     * Runs the recall selector in a virtual thread and returns a future
-     * that will complete with the rendered system-reminder string (or ""
-     * if nothing was selected / selector timed out). Fires a fresh
-     * side-query LlmClient per call so the selector's SYSTEM prompt is
-     * independent of the main conversation's system prompt.
-     */
-    private CompletableFuture<String> prefetchRelevantMemories(String query) {
-        if (memoryManager == null || selectedProvider == null) {
-            return CompletableFuture.completedFuture("");
-        }
-        var provider = selectedProvider;
-        var userDir = memoryManager.userMemDir();
-        var projectDir = memoryManager.projectMemDir();
-
-        return CompletableFuture.supplyAsync(() -> {
-            MemoryRecall.SelectorFn selector = (systemPrompt, userMessage) -> {
-                LlmClient sideClient = LlmClient.create(provider, systemPrompt);
-                ConversationManager miniConv = new ConversationManager();
-                miniConv.addUserMessage(userMessage);
-                BlockingQueue<com.codeflow.llm.StreamEvent> events = sideClient.stream(miniConv, null);
-                var sb = new StringBuilder();
-                while (true) {
-                    var event = events.take();
-                    if (event instanceof com.codeflow.llm.StreamEvent.TextDelta td) {
-                        sb.append(td.text());
-                    } else if (event instanceof com.codeflow.llm.StreamEvent.StreamEnd
-                            || event instanceof com.codeflow.llm.StreamEvent.Error) {
-                        break;
-                    }
-                }
-                return sb.toString();
-            };
-            var results = MemoryRecall.findRelevantMemories(
-                    query, userDir, projectDir, null, null, selector);
-            return MemoryRecall.renderReminder(results);
-        }, runnable -> {
-            // Run on a virtual thread with 8s timeout.
-            Thread t = Thread.ofVirtual().name("memory-recall-prefetch").start(runnable);
-            Thread.ofVirtual().start(() -> {
-                try {
-                    if (!t.join(java.time.Duration.ofSeconds(8))) {
-                        t.interrupt();
-                    }
-                } catch (InterruptedException ignored) {}
-            });
-        });
-    }
-
-    /**
-     * Waits up to 3 seconds for the prefetch future to produce a rendered
-     * reminder, then injects it as a system-reminder on the given
-     * conversation. If the timeout fires first, the prefetch keeps running
-     * but its result is dropped — recall is best-effort and must not stall
-     * the user's main request.
-     */
-    private static void collectPrefetchedRecall(
-            ConversationManager conv, CompletableFuture<String> prefetchFuture) {
-        if (conv == null || prefetchFuture == null) return;
-        try {
-            String reminder = prefetchFuture.get(3, TimeUnit.SECONDS);
-            if (reminder != null && !reminder.isEmpty()) {
-                conv.addSystemReminder(reminder);
-            }
-        } catch (Exception ignored) {
-            // Timeout or error — recall is best-effort, don't block the user.
-        }
-    }
-
     // ────────────────────────────────────────────────────────────────────
     // Tool block management
     // ────────────────────────────────────────────────────────────────────
@@ -1883,6 +1790,8 @@ public class CodeFlowModel implements Model {
     }
 
     private void savePartialResponse() {
+        AgentRunHandle handle = activeRun;
+        if (handle != null) handle.cancel("用户从终端取消");
         if (!streamBuf.isEmpty()) {
             chatMessages.add(new ChatMessage("assistant", streamBuf.toString()));
             conversation.addAssistantMessage(streamBuf.toString());
@@ -1893,6 +1802,7 @@ public class CodeFlowModel implements Model {
         chatMessages.add(new ChatMessage("system", "(response interrupted)"));
         streaming = false;
         agentQueue = null;
+        activeRun = null;
         userScrolled = false;
         scrollOffset = 0;
     }

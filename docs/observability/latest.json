@@ -1,0 +1,14 @@
+{
+  "timestamp": "2026-09-08",
+  "result": "PASS",
+  "agent": "CodeFlow Python Static Analysis Agent",
+  "protocolVersion": "1.0",
+  "protocolBinding": "HTTP+JSON",
+  "state": "TASK_STATE_COMPLETED",
+  "artifacts": 1,
+  "scannedJavaFiles": 210,
+  "findings": 49,
+  "durationMs": 323,
+  "traceId": "0affb88f875df1a6fe77e41fa51b6a89",
+  "traceCorrelated": true
+}

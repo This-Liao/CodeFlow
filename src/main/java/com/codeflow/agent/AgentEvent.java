@@ -36,6 +36,9 @@ public sealed interface AgentEvent {
 
     record RetryEvent(String reason, long waitMs) implements AgentEvent {}
 
+    /** The owning Agent loop was explicitly cancelled by an interactive adapter. */
+    record CanceledEvent(String reason) implements AgentEvent {}
+
     record PermissionRequestEvent(String toolName, String description,
                                   CompletableFuture<PermissionResponse> future) implements AgentEvent {}
 

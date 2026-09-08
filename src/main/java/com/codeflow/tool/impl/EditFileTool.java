@@ -25,6 +25,7 @@ public class EditFileTool implements Tool {
             Usage notes:
             - You MUST read the file with ReadFile before editing. This tool will fail otherwise.
             - When editing text from ReadFile output, preserve the exact indentation (tabs/spaces) as shown.
+            - LF/CRLF differences are normalized automatically while preserving the file's existing line ending.
             - ALWAYS prefer editing existing files over creating new ones.
             - The edit will FAIL if old_string is not unique in the file. Provide more surrounding context to make it unique.
             - Use the smallest old_string that is clearly unique — 2-4 adjacent lines is usually sufficient.
@@ -96,7 +97,19 @@ public class EditFileTool implements Tool {
             return ToolResult.error("Error reading file: " + e.getMessage());
         }
 
-        int count = countOccurrences(content, oldStr);
+        String effectiveOld = oldStr;
+        String effectiveNew = newStr;
+        int count = countOccurrences(content, effectiveOld);
+        if (count == 0 && containsLineBreak(oldStr)) {
+            String lineEnding = content.contains("\r\n") ? "\r\n" : "\n";
+            String adjustedOld = withLineEnding(oldStr, lineEnding);
+            int adjustedCount = countOccurrences(content, adjustedOld);
+            if (adjustedCount > 0) {
+                effectiveOld = adjustedOld;
+                effectiveNew = withLineEnding(newStr, lineEnding);
+                count = adjustedCount;
+            }
+        }
         if (count == 0) {
             return ToolResult.error("Error: old_string not found in file");
         }
@@ -104,7 +117,7 @@ public class EditFileTool implements Tool {
             return ToolResult.error("Error: old_string found " + count + " times, must be unique");
         }
 
-        String newContent = content.replace(oldStr, newStr);
+        String newContent = content.replace(effectiveOld, effectiveNew);
 
         try {
             Files.writeString(path, newContent);
@@ -135,6 +148,14 @@ public class EditFileTool implements Tool {
             idx += sub.length();
         }
         return count;
+    }
+
+    private static boolean containsLineBreak(String value) {
+        return value.indexOf('\n') >= 0 || value.indexOf('\r') >= 0;
+    }
+
+    private static String withLineEnding(String value, String lineEnding) {
+        return value.replace("\r\n", "\n").replace('\r', '\n').replace("\n", lineEnding);
     }
 
     private static String stringArg(Map<String, Object> args, String key, String def) {

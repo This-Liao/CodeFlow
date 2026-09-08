@@ -6,26 +6,27 @@
 
 | 验证项 | 实测结果 |
 | --- | --- |
-| 时间（UTC） | 2026-08-28T07:23:26+00:00 |
+| 时间（UTC） | 2026-09-08T05:37:57+00:00 |
 | Gradle 构建 | PASS |
-| JUnit | 205 项；203 通过；0 失败；2 跳过 |
-| 可执行 JAR | 82.88 MiB |
+| JUnit | 215 项；212 通过；0 失败；3 跳过 |
+| 可执行 JAR | 85.73 MiB |
 | A2A Agent | CodeFlow Python Static Analysis Agent |
 | 协议 | A2A 1.0 / HTTP+JSON |
 | 任务终态 | TASK_STATE_COMPLETED |
 | 返回 Artifact | 1 |
-| 实际扫描 Java 文件 | 194 |
-| 静态分析候选问题 | 48 |
-| Java→Python 端到端耗时 | 324 ms |
+| 实际扫描 Java 文件 | 210 |
+| 静态分析候选问题 | 49 |
+| Java→Python 端到端耗时 | 323 ms |
+| A2A Trace Correlation | true；`0affb88f875df1a6fe77e41fa51b6a89` |
 | Crash-Recovery | PASS；EXECUTING → COMPLETED |
 | Checkpoint 复用 | true |
 | 重复 Tool Call | 0 |
 | 文件哈希保持 | true |
-| 新 JVM 恢复耗时 | 125 ms |
+| 新 JVM 恢复耗时 | 139 ms |
 | Context 基准 | PASS；24 条任务 / 46 个工具 |
 | Context 任务成功率 | 100.0% |
 | 阶段识别准确率 | 100.0% |
-| Tool Schema 减少 | 75.7% |
+| Tool Schema 减少 | 75.5% |
 | ToolSearch 错误 | 0 |
 | 环境 | Windows 11 (AMD64); java version "22.0.2" 2024-07-16 |
 
@@ -51,11 +52,11 @@ JVM-1 执行真实 EditFile
 24 条固定任务 / 46 个工具
   → full-tool-injection
   → deferred-tool
-  → stage-aware Context Policy
+  → lexical / vector / hybrid Context Policy
   → 校验成功率、阶段识别、Schema 压缩与 ToolSearch 错误
   → PASS
 ```
 
 ## 复现
 
-请从仓库根目录执行 README“工程验证”中的三条命令。脚本仅在构建、全部测试、A2A Artifact、Crash-Recovery 和 Context 回归门禁均成功后覆盖本文件、JSON 结果与 GIF。
+请从仓库根目录执行 README“工程验证”中的三条命令。脚本仅在构建、全部测试、A2A Artifact、Crash-Recovery 和 Context 回归门禁均成功后更新本文件与 JSON 结果；`--gif` 只生成本地验证画面，不替代首页的真实端到端录屏。

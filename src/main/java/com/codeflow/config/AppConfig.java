@@ -12,6 +12,7 @@ public class AppConfig {
     private List<A2aAgentConfig> a2aAgents;
     private List<HookConfig> hooks;
     private ContextPolicyConfig contextPolicy;
+    private DurableStoreConfig durableStore;
 
     // 沙箱配置（嵌套对象，对应 YAML 中的 sandbox: 节点）
     private SandboxYamlConfig sandbox;
@@ -38,6 +39,8 @@ public class AppConfig {
 
     public ContextPolicyConfig getContextPolicy() { return contextPolicy; }
     public void setContextPolicy(ContextPolicyConfig contextPolicy) { this.contextPolicy = contextPolicy; }
+    public DurableStoreConfig getDurableStore() { return durableStore; }
+    public void setDurableStore(DurableStoreConfig durableStore) { this.durableStore = durableStore; }
 
     public List<HookConfig> getHooks() { return hooks; }
     public void setHooks(List<HookConfig> hooks) { this.hooks = hooks; }

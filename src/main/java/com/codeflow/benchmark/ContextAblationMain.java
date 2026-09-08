@@ -33,7 +33,9 @@ public final class ContextAblationMain {
         List<VariantResult> results = List.of(
                 runVariant("full-tool-injection", Variant.FULL, tasks),
                 runVariant("deferred-tool", Variant.DEFERRED, tasks),
-                runVariant("context-policy", Variant.CONTEXT, tasks));
+                runVariant("context-lexical", Variant.LEXICAL, tasks),
+                runVariant("context-vector", Variant.VECTOR, tasks),
+                runVariant("context-hybrid", Variant.HYBRID, tasks));
         double fullChars = results.getFirst().averageSchemaChars();
         VariantResult context = results.getLast();
         double contextReduction = 100.0 * (1.0 - context.averageSchemaChars() / fullChars);
@@ -86,7 +88,13 @@ public final class ContextAblationMain {
                 registry.listTools().forEach(tool -> registry.markDiscovered(tool.name()));
             }
             ContextPolicyConfig config = new ContextPolicyConfig();
-            config.setEnabled(variant == Variant.CONTEXT);
+            config.setEnabled(variant == Variant.LEXICAL
+                    || variant == Variant.VECTOR || variant == Variant.HYBRID);
+            config.setStrategy(switch (variant) {
+                case LEXICAL -> "lexical";
+                case VECTOR -> "vector";
+                default -> "hybrid";
+            });
             config.setMaxToolSchemas(12);
             config.setMaxSchemaChars(20_000);
             ConversationManager conversation = new ConversationManager();
@@ -247,7 +255,7 @@ public final class ContextAblationMain {
         return Math.round(value * 10.0) / 10.0;
     }
 
-    private enum Variant { FULL, DEFERRED, CONTEXT }
+    private enum Variant { FULL, DEFERRED, LEXICAL, VECTOR, HYBRID }
     private record Spec(String name, String description, boolean deferred) {}
     private record TaskCase(String prompt, ContextStage stage, Set<String> requiredTools) {}
     private record VariantResult(

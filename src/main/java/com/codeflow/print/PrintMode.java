@@ -20,6 +20,8 @@ import com.codeflow.permission.PermissionResponse;
 import com.codeflow.prompt.PromptBuilder;
 import com.codeflow.session.SessionManager;
 import com.codeflow.skill.SkillCatalog;
+import com.codeflow.runtime.AgentRuntime;
+import com.codeflow.runtime.SkillRuntimeSupport;
 import com.codeflow.subagent.AgentTool;
 import com.codeflow.subagent.SubAgentTaskManager;
 import com.codeflow.task.TaskList;
@@ -30,7 +32,6 @@ import com.codeflow.tool.impl.AskUserTool;
 import com.codeflow.tool.impl.ToolSearchTool;
 import com.codeflow.worktree.WorktreeManager;
 
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.*;
@@ -77,10 +78,11 @@ public class PrintMode {
         // ── 记忆管理 ──────────────────────────────────────────────────
         MemoryManager memoryManager = new MemoryManager(workDir);
         String instructionsContent = MemoryManager.loadInstructions(workDir);
+        SkillCatalog skillCatalog = SkillRuntimeSupport.load(workDir);
 
         // ── 构建系统提示词 ──────────────────────────────────────────────
         var env = PromptBuilder.detectEnvironment(providerCfg.getModel());
-        var options = new PromptBuilder.BuildOptions(null);
+        var options = new PromptBuilder.BuildOptions(skillCatalog.buildSection(workDir));
         String systemPrompt = PromptBuilder.buildSystemPrompt(env, options);
 
         // ── 创建 LLM 客户端 ─────────────────────────────────────────────
@@ -90,8 +92,10 @@ public class PrintMode {
         // ── 工具注册 ────────────────────────────────────────────────────
         ToolRegistry registry = ToolRegistry.createDefault();
         registry.register(new ToolSearchTool(registry, protocol));
-        com.codeflow.AgentPlatform.registerDurableAndA2a(registry, workDir,
-                config.getA2aAgents() != null ? config.getA2aAgents() : List.of());
+        com.codeflow.durable.DurableTaskRepository durableStore =
+                com.codeflow.AgentPlatform.registerDurableAndA2a(registry, workDir,
+                        config.getA2aAgents() != null ? config.getA2aAgents() : List.of(),
+                        config.getDurableStore());
 
         var exitPlanTool = new com.codeflow.tool.impl.ExitPlanModeTool();
         exitPlanTool.setIsPlanMode(() -> false); // print 模式不用 plan
@@ -113,38 +117,16 @@ public class PrintMode {
         var worktreeManager = new WorktreeManager(workDir, List.of(), 720);
         agentTool.setWorktreeManager(worktreeManager);
         String sessionId = SessionManager.newId();
-        com.codeflow.durable.DurableTaskStore durableStore =
-                new com.codeflow.durable.DurableTaskStore(workDir);
         com.codeflow.durable.DurableTask durableTask = null;
         boolean resumingDurableTask = durableOptions != null && durableOptions.resumeTaskId() != null;
-        if (durableOptions != null && durableOptions.enabled()) {
+        if (resumingDurableTask) {
             try {
-                if (resumingDurableTask) {
-                    durableTask = durableStore.get(durableOptions.resumeTaskId())
-                            .orElseThrow(() -> new IllegalArgumentException(
-                                    "durable task not found: " + durableOptions.resumeTaskId()));
-                    if (durableTask.getSessionId() != null && !durableTask.getSessionId().isBlank()) {
-                        sessionId = durableTask.getSessionId();
-                    }
-                    if (durableTask.getState() == com.codeflow.durable.DurableTaskState.PAUSED
-                            || durableTask.getState() == com.codeflow.durable.DurableTaskState.WAITING_APPROVAL
-                            || durableTask.getState() == com.codeflow.durable.DurableTaskState.FAILED_RETRYABLE) {
-                        durableTask = durableStore.resume(durableTask.getId(), "resumed from CLI");
-                    } else if (!durableTask.getState().isTerminal()) {
-                        durableTask = durableStore.recover(
-                                durableTask.getId(), "print-mode", "runtime restarted from CLI",
-                                durableTask.getVersion());
-                    }
-                } else {
-                    durableTask = durableStore.create(prompt, sessionId, "print-mode", 3);
-                    durableTask = durableStore.transition(durableTask.getId(),
-                            com.codeflow.durable.DurableTaskState.PLANNING,
-                            "run accepted", durableTask.getVersion());
-                    durableTask = durableStore.transition(durableTask.getId(),
-                            com.codeflow.durable.DurableTaskState.EXECUTING,
-                            "context initialized", durableTask.getVersion());
+                durableTask = durableStore.get(durableOptions.resumeTaskId())
+                        .orElseThrow(() -> new IllegalArgumentException(
+                                "durable task not found: " + durableOptions.resumeTaskId()));
+                if (durableTask.getSessionId() != null && !durableTask.getSessionId().isBlank()) {
+                    sessionId = durableTask.getSessionId();
                 }
-                System.err.println("Durable task: " + durableTask.getId());
             } catch (RuntimeException e) {
                 System.err.println("Durable execution error: " + e.getMessage());
                 return;
@@ -209,10 +191,6 @@ public class PrintMode {
         agent.setWorkDir(workDir);
         agent.setSessionId(sessionId);
         agent.setContextPolicy(new com.codeflow.context.ContextPolicy(config.getContextPolicy()));
-        var traceRecorder = new com.codeflow.eval.TraceRecorder(workDir);
-        traceRecorder.begin(prompt, providerCfg.getModel(), sessionId,
-                Map.of("mode", "print", "protocol", protocol));
-        agent.setEventObserver(traceRecorder);
 
         // 通知函数：排空团队邮箱和任务通知
         agent.setNotificationFn(() -> {
@@ -255,12 +233,10 @@ public class PrintMode {
         }
         agent.setHookEngine(hookEngine);
 
-        // ── Skill 加载 ──────────────────────────────────────────────────
-        SkillCatalog skillCatalog = new SkillCatalog();
-        var skillDir = Path.of(workDir, ".codeflow", "skills");
-        if (Files.isDirectory(skillDir)) {
-            skillCatalog.loadFromDirectory(skillDir);
-        }
+        SkillRuntimeSupport.wire(skillCatalog, registry, () -> conversation, null,
+                name -> client.setSystemPrompt(PromptBuilder.buildSystemPrompt(
+                        PromptBuilder.detectEnvironment(providerCfg.getModel()),
+                        new PromptBuilder.BuildOptions(skillCatalog.buildSection(workDir)))));
 
         // ── MCP 服务器连接 ──────────────────────────────────────────────
         String mcpInstructions = "";
@@ -306,7 +282,20 @@ public class PrintMode {
             conversation.addSystemReminder(mcpInstructions);
         }
 
-        BlockingQueue<AgentEvent> queue = agent.run(conversation);
+        var runtime = new AgentRuntime(agent, client, providerCfg, workDir, "print",
+                memoryManager, durableStore, ignored -> { });
+        boolean durableEnabled = durableOptions != null && durableOptions.enabled();
+        var startOptions = new AgentRuntime.StartOptions(
+                prompt, sessionId, durableEnabled,
+                resumingDurableTask ? durableOptions.resumeTaskId() : null,
+                "print-" + ProcessHandle.current().pid() + "-"
+                        + java.util.UUID.randomUUID().toString().substring(0, 8));
+        var runtimeRun = runtime.start(conversation, startOptions);
+        var runHandle = runtimeRun.handle();
+        if (runtimeRun.durableTaskId() != null) {
+            System.err.println("Durable task: " + runtimeRun.durableTaskId());
+        }
+        BlockingQueue<AgentEvent> queue = runHandle.events();
         if (askUserTool != null) askUserTool.setEventQueue(queue);
 
         // ── 消费事件循环 ────────────────────────────────────────────────
@@ -317,8 +306,6 @@ public class PrintMode {
         int totalCacheCreationTokens = 0;
         int totalTurns = 0;
         var toolCalls = new ArrayList<Map<String, Object>>();
-        final String activeDurableTaskId = durableTask == null ? null : durableTask.getId();
-
         while (true) {
             AgentEvent event;
             try {
@@ -374,10 +361,6 @@ public class PrintMode {
                         obj.put("elapsed", e.elapsed());
                         printJson(obj);
                     }
-                    if (activeDurableTaskId != null && e.isError()) {
-                        checkpointDurable(durableStore, activeDurableTaskId, Map.of(
-                                "lastTool", e.toolName(), "lastToolError", e.output()), "tool error");
-                    }
                 }
 
                 case AgentEvent.PermissionRequestEvent e -> {
@@ -408,13 +391,6 @@ public class PrintMode {
 
                 case AgentEvent.TurnComplete e -> {
                     totalTurns = e.turn();
-                    if (activeDurableTaskId != null) {
-                        checkpointDurable(durableStore, activeDurableTaskId, Map.of(
-                                "turn", totalTurns,
-                                "inputTokens", totalInputTokens,
-                                "outputTokens", totalOutputTokens,
-                                "toolCalls", toolCalls.size()), "turn completed");
-                    }
                     // text 模式下清空已累积文本（中间 turn 的文本不是最终结果）
                     if (format == OutputFormat.TEXT) {
                         resultText.setLength(0);
@@ -424,9 +400,6 @@ public class PrintMode {
                 case AgentEvent.LoopComplete e -> {
                     if (e.totalTurns() > 0) totalTurns = e.totalTurns();
                     long durationMs = System.currentTimeMillis() - startTime;
-                    if (activeDurableTaskId != null && e.totalTurns() > 0) {
-                        completeDurable(durableStore, activeDurableTaskId, durationMs);
-                    }
 
                     if (format == OutputFormat.TEXT) {
                         // 纯文本模式：输出最终结果
@@ -456,9 +429,6 @@ public class PrintMode {
                 }
 
                 case AgentEvent.ErrorEvent e -> {
-                    if (activeDurableTaskId != null) {
-                        failDurable(durableStore, activeDurableTaskId, e.message());
-                    }
                     if (format == OutputFormat.STREAM_JSON) {
                         var obj = new LinkedHashMap<String, Object>();
                         obj.put("type", "error");
@@ -474,18 +444,15 @@ public class PrintMode {
                 }
 
                 case AgentEvent.RetryEvent e -> {
-                    if (activeDurableTaskId != null) {
-                        resumeDurable(durableStore, activeDurableTaskId, e.reason());
-                    }
                     // print 模式静默处理 retry
+                }
+                case AgentEvent.CanceledEvent e -> {
+                    if (format == OutputFormat.STREAM_JSON) {
+                        printJson(Map.of("type", "canceled", "reason", e.reason()));
+                    }
                 }
             }
         }
-    }
-
-    private static void checkpointDurable(com.codeflow.durable.DurableTaskStore store, String id,
-                                          Map<String, Object> checkpoint, String reason) {
-        try { store.checkpoint(id, checkpoint, reason); } catch (RuntimeException ignored) {}
     }
 
     private static String checkpointJson(Map<String, Object> checkpoint) {
@@ -494,43 +461,6 @@ public class PrintMode {
         } catch (Exception ignored) {
             return "{}";
         }
-    }
-
-    private static void completeDurable(com.codeflow.durable.DurableTaskStore store, String id,
-                                        long durationMs) {
-        try {
-            var task = store.get(id).orElseThrow();
-            if (task.getState() == com.codeflow.durable.DurableTaskState.EXECUTING) {
-                task = store.transition(id, com.codeflow.durable.DurableTaskState.VERIFYING,
-                        "agent loop completed", task.getVersion());
-            }
-            if (task.getState() == com.codeflow.durable.DurableTaskState.VERIFYING) {
-                store.checkpoint(id, Map.of("durationMs", durationMs), "final result persisted");
-                task = store.get(id).orElseThrow();
-                store.transition(id, com.codeflow.durable.DurableTaskState.COMPLETED,
-                        "result and trace persisted", task.getVersion());
-            }
-        } catch (RuntimeException ignored) {}
-    }
-
-    private static void failDurable(com.codeflow.durable.DurableTaskStore store, String id, String error) {
-        try {
-            var task = store.get(id).orElseThrow();
-            if (!task.getState().isTerminal()
-                    && task.getState() != com.codeflow.durable.DurableTaskState.FAILED_RETRYABLE) {
-                store.transition(id, com.codeflow.durable.DurableTaskState.FAILED_RETRYABLE,
-                        error, task.getVersion());
-            }
-        } catch (RuntimeException ignored) {}
-    }
-
-    private static void resumeDurable(com.codeflow.durable.DurableTaskStore store, String id, String reason) {
-        try {
-            var task = store.get(id).orElseThrow();
-            if (task.getState() == com.codeflow.durable.DurableTaskState.FAILED_RETRYABLE) {
-                store.resume(id, "agent retry: " + reason);
-            }
-        } catch (RuntimeException ignored) {}
     }
 
     /**

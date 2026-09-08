@@ -13,9 +13,9 @@ import java.util.Map;
 /** Agent-facing control plane for durable tasks and checkpoints. */
 public final class DurableTaskTool implements Tool {
     private static final ObjectMapper MAPPER = new ObjectMapper();
-    private final DurableTaskStore store;
+    private final DurableTaskRepository store;
 
-    public DurableTaskTool(DurableTaskStore store) {
+    public DurableTaskTool(DurableTaskRepository store) {
         this.store = store;
     }
 

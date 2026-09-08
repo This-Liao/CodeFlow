@@ -33,7 +33,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = ROOT / "examples" / "a2a-static-analysis-agent"
-DEFAULT_GIF = ROOT / "docs" / "assets" / "codeflow-validation.gif"
+DEFAULT_GIF = ROOT / ".codeflow" / "validation-run.gif"
 DEFAULT_JSON = ROOT / "docs" / "validation" / "latest.json"
 DEFAULT_MARKDOWN = ROOT / "docs" / "VALIDATION.md"
 DEFAULT_BENCHMARK_JSON = ROOT / "docs" / "benchmarks" / "context-ablation.json"
@@ -254,13 +254,13 @@ def terminal_lines(
     )
     lines.extend(["", "=== Durable crash-recovery E2E ===", ""])
     lines.extend(durable_lines)
-    context = next(row for row in benchmark["variants"] if row["name"] == "context-policy")
+    context = next(row for row in benchmark["variants"] if row["name"] == "context-hybrid")
     lines.extend([
         "",
         "=== Context/Deferred Tool ablation ===",
         "",
         f"tasks: {benchmark['taskCount']}, tool catalog: {benchmark['toolCatalogSize']}",
-        f"context-policy success: {context['successRate']:.1f}%",
+        f"context-hybrid success: {context['successRate']:.1f}%",
         f"initial schemas: {context['averageInitialToolSchemas']:.1f}",
         f"schema reduction vs full: {context['schemaReductionPct']:.1f}%",
         f"tool errors: {context['toolErrors']}",
@@ -376,7 +376,7 @@ def write_reports(
     durable = report["durableRecovery"]
     benchmark = report["contextBenchmark"]
     context = next(
-        row for row in benchmark["variants"] if row["name"] == "context-policy"
+        row for row in benchmark["variants"] if row["name"] == "context-hybrid"
     )
     markdown = f"""# CodeFlow 工程验证
 
@@ -397,6 +397,7 @@ def write_reports(
 | 实际扫描 Java 文件 | {a2a['scannedJavaFiles']} |
 | 静态分析候选问题 | {a2a['findings']} |
 | Java→Python 端到端耗时 | {a2a['durationMs']} ms |
+| A2A Trace Correlation | {str(a2a.get('traceCorrelated', False)).lower()}；`{a2a.get('traceId', '')}` |
 | Crash-Recovery | {durable['result']}；{durable['recoveredFrom']} → {durable['finalState']} |
 | Checkpoint 复用 | {str(durable['reusedCheckpoint']).lower()} |
 | 重复 Tool Call | {durable['duplicateToolCalls']} |
@@ -431,14 +432,14 @@ JVM-1 执行真实 EditFile
 24 条固定任务 / 46 个工具
   → full-tool-injection
   → deferred-tool
-  → stage-aware Context Policy
+  → lexical / vector / hybrid Context Policy
   → 校验成功率、阶段识别、Schema 压缩与 ToolSearch 错误
   → PASS
 ```
 
 ## 复现
 
-请从仓库根目录执行 README“工程验证”中的三条命令。脚本仅在构建、全部测试、A2A Artifact、Crash-Recovery 和 Context 回归门禁均成功后覆盖本文件、JSON 结果与 GIF。
+请从仓库根目录执行 README“工程验证”中的三条命令。脚本仅在构建、全部测试、A2A Artifact、Crash-Recovery 和 Context 回归门禁均成功后更新本文件与 JSON 结果；`--gif` 只生成本地验证画面，不替代首页的真实端到端录屏。
 """
     markdown_path.write_text(markdown, encoding="utf-8")
 
@@ -482,6 +483,8 @@ def write_benchmark_reports(
 
 - Success 表示必需工具能在初始上下文中获得，或能通过 ToolSearch 在第二步精确恢复。
 - Initial Tool Recall 衡量第一轮是否已经注入任务所需工具；它与 Schema 压缩率存在明确权衡。
+- 当前固定集上三种 Context 策略的初始 Recall 相同；Hybrid 没有被包装成准确率提升，其价值是允许在阶段先验、词法匹配和向量相关度之间做可配置、可回退的工程权衡。
+- 默认 Vector 使用离线 feature hashing，适合可复现基准；OpenAI-compatible Embedding 是显式可选项，失败时回退到 Lexical。
 - 该基准不调用 LLM，因此不能替代真实模型任务成功率。真实模型评测作为独立的可选层运行，避免 CI 受随机性和外部 API 影响。
 """
     markdown_path.write_text(markdown, encoding="utf-8")
@@ -591,10 +594,10 @@ def main() -> int:
     render_terminal_gif(transcript, args.gif)
     write_reports(report, args.json, args.markdown)
     write_benchmark_reports(benchmark, args.benchmark_json, args.benchmark_markdown)
-    print(f"Recorded GIF : {args.gif.relative_to(ROOT)}")
-    print(f"JSON report  : {args.json.relative_to(ROOT)}")
-    print(f"Human report : {args.markdown.relative_to(ROOT)}")
-    print(f"Benchmark    : {args.benchmark_markdown.relative_to(ROOT)}")
+    print(f"Recorded GIF : {args.gif.resolve().relative_to(ROOT)}")
+    print(f"JSON report  : {args.json.resolve().relative_to(ROOT)}")
+    print(f"Human report : {args.markdown.resolve().relative_to(ROOT)}")
+    print(f"Benchmark    : {args.benchmark_markdown.resolve().relative_to(ROOT)}")
     return 0
 
 

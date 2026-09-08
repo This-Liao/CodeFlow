@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.codeflow.config.A2aAgentConfig;
+import com.codeflow.observability.Telemetry;
+import io.opentelemetry.api.trace.SpanKind;
 
 import java.io.IOException;
 import java.net.URI;
@@ -40,6 +42,22 @@ public final class A2aClient {
     }
 
     public A2aAgentCard discover() throws IOException, InterruptedException {
+        Telemetry.SpanScope span = Telemetry.startSpan("codeflow.a2a.discover", SpanKind.CLIENT);
+        try {
+            span.span().setAttribute("codeflow.a2a.agent", config.getName());
+            return discoverInternal();
+        } catch (IOException | InterruptedException failure) {
+            span.fail(failure);
+            throw failure;
+        } catch (RuntimeException failure) {
+            span.fail(failure);
+            throw failure;
+        } finally {
+            span.close();
+        }
+    }
+
+    private A2aAgentCard discoverInternal() throws IOException, InterruptedException {
         JsonNode root = send(HttpRequest.newBuilder(checkedHttpUri(config.getCardUrl())).GET()).body();
         String name = requiredText(root, "name");
         var interfaces = new ArrayList<A2aAgentCard.Interface>();
@@ -66,6 +84,25 @@ public final class A2aClient {
 
     public A2aTaskResult delegate(String prompt) throws IOException, InterruptedException {
         if (prompt == null || prompt.isBlank()) throw new IllegalArgumentException("prompt is required");
+        Telemetry.SpanScope span = Telemetry.startSpan("codeflow.a2a.delegate", SpanKind.CLIENT);
+        try {
+            span.span().setAttribute("codeflow.a2a.agent", config.getName());
+            A2aTaskResult result = delegateInternal(prompt);
+            span.span().setAttribute("codeflow.a2a.task.state", result.state());
+            if (result.taskId() != null) span.span().setAttribute("codeflow.a2a.task.id", result.taskId());
+            return result;
+        } catch (IOException | InterruptedException failure) {
+            span.fail(failure);
+            throw failure;
+        } catch (RuntimeException failure) {
+            span.fail(failure);
+            throw failure;
+        } finally {
+            span.close();
+        }
+    }
+
+    private A2aTaskResult delegateInternal(String prompt) throws IOException, InterruptedException {
         A2aAgentCard card = discover();
         A2aAgentCard.Interface selected = selectInterface(card);
         ObjectNode request = MAPPER.createObjectNode();
@@ -129,6 +166,7 @@ public final class A2aClient {
     private Response send(HttpRequest.Builder builder) throws IOException, InterruptedException {
         String token = config.getAuthEnv() == null ? null : System.getenv(config.getAuthEnv());
         if (token != null && !token.isBlank()) builder.header("Authorization", "Bearer " + token);
+        Telemetry.inject(builder);
         HttpResponse<byte[]> response = http.send(builder.timeout(Duration.ofSeconds(Math.max(1,
                 config.getTimeoutSeconds()))).build(), HttpResponse.BodyHandlers.ofByteArray());
         if (response.body().length > MAX_RESPONSE_BYTES) throw new IOException("A2A response exceeds 4 MiB limit");

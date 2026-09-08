@@ -5,6 +5,7 @@ import com.codeflow.compact.RecoveryState;
 import com.codeflow.hook.HookEngine;
 import com.codeflow.permission.PermissionChecker;
 import com.codeflow.permission.PermissionResponse;
+import com.codeflow.observability.Telemetry;
 import com.codeflow.tool.Tool;
 import com.codeflow.tool.ToolCategory;
 import com.codeflow.tool.ToolRegistry;
@@ -17,10 +18,17 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
+import java.util.function.BooleanSupplier;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.SpanKind;
+import io.opentelemetry.api.trace.StatusCode;
+import io.opentelemetry.context.Context;
+import io.opentelemetry.context.Scope;
 
 /**
  * Concurrent tool executor that partitions tool calls into read-only (parallel)
@@ -35,6 +43,7 @@ public class StreamingExecutor {
     private final BlockingQueue<AgentEvent> eventQueue;
     private final RecoveryState recoveryState;
     private final Consumer<AgentEvent> eventObserver;
+    private final BooleanSupplier cancelled;
 
     public record ToolCallInfo(String toolId, String toolName, Map<String, Object> args) {}
     public record ToolExecResult(String toolId, String output, boolean isError) {}
@@ -53,12 +62,20 @@ public class StreamingExecutor {
     public StreamingExecutor(ToolRegistry registry, PermissionChecker checker,
                              HookEngine hookEngine, BlockingQueue<AgentEvent> eventQueue,
                              RecoveryState recoveryState, Consumer<AgentEvent> eventObserver) {
+        this(registry, checker, hookEngine, eventQueue, recoveryState, eventObserver, () -> false);
+    }
+
+    public StreamingExecutor(ToolRegistry registry, PermissionChecker checker,
+                             HookEngine hookEngine, BlockingQueue<AgentEvent> eventQueue,
+                             RecoveryState recoveryState, Consumer<AgentEvent> eventObserver,
+                             BooleanSupplier cancelled) {
         this.registry = registry;
         this.checker = checker;
         this.hookEngine = hookEngine;
         this.eventQueue = eventQueue;
         this.recoveryState = recoveryState;
         this.eventObserver = eventObserver == null ? ignored -> {} : eventObserver;
+        this.cancelled = cancelled == null ? () -> false : cancelled;
     }
 
     public List<ToolExecResult> executeAll(List<ToolCallInfo> calls) {
@@ -67,18 +84,29 @@ public class StreamingExecutor {
         var results = new ArrayList<ToolExecResult>();
 
         for (var batch : batches) {
+            if (cancelled.getAsBoolean() || Thread.currentThread().isInterrupted()) break;
             if (batch.concurrent && batch.calls.size() > 1) {
                 try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+                    Context parentContext = Context.current();
                     var futures = batch.calls.stream()
-                            .map(call -> executor.submit(() -> executeSingle(call)))
+                            .map(call -> executor.submit(parentContext.wrap(
+                                    (Callable<ToolExecResult>) () -> executeSingle(call))))
                             .toList();
                     for (var future : futures) {
-                        try { results.add(future.get()); }
-                        catch (Exception ignored) {}
+                        try {
+                            results.add(future.get());
+                        } catch (InterruptedException e) {
+                            futures.forEach(item -> item.cancel(true));
+                            Thread.currentThread().interrupt();
+                            break;
+                        } catch (Exception ignored) { }
                     }
                 }
             } else {
-                for (var call : batch.calls) results.add(executeSingle(call));
+                for (var call : batch.calls) {
+                    if (cancelled.getAsBoolean() || Thread.currentThread().isInterrupted()) break;
+                    results.add(executeSingle(call));
+                }
             }
         }
 
@@ -103,6 +131,29 @@ public class StreamingExecutor {
     }
 
     private ToolExecResult executeSingle(ToolCallInfo call) {
+        Span span = Telemetry.tracer().spanBuilder("codeflow.tool.execute")
+                .setSpanKind(SpanKind.INTERNAL)
+                .setAttribute("codeflow.tool.name", call.toolName())
+                .setAttribute("codeflow.tool.id", call.toolId())
+                .startSpan();
+        try (Scope ignored = span.makeCurrent()) {
+            ToolExecResult result = executeSingleCore(call);
+            span.setAttribute("codeflow.tool.error", result.isError());
+            if (result.isError()) span.setStatus(StatusCode.ERROR);
+            return result;
+        } catch (RuntimeException failure) {
+            span.recordException(failure);
+            span.setStatus(StatusCode.ERROR, failure.getMessage());
+            throw failure;
+        } finally {
+            span.end();
+        }
+    }
+
+    private ToolExecResult executeSingleCore(ToolCallInfo call) {
+        if (cancelled.getAsBoolean() || Thread.currentThread().isInterrupted()) {
+            return new ToolExecResult(call.toolId(), "Canceled before tool execution", true);
+        }
         Tool tool = registry.get(call.toolName());
         if (tool == null) {
             putSafe(new AgentEvent.ToolResultEvent(call.toolId(), call.toolName(), "Unknown tool", true, 0));
@@ -125,6 +176,9 @@ public class StreamingExecutor {
                     PermissionResponse response;
                     try {
                         response = future.get(5, TimeUnit.MINUTES);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return new ToolExecResult(call.toolId(), "Canceled while waiting for permission", true);
                     } catch (Exception e) {
                         response = PermissionResponse.DENY;
                     }

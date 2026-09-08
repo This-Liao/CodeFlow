@@ -98,6 +98,47 @@ class ContextPolicyTest {
         assertTrue(selected.length() <= 1_000);
     }
 
+    @Test
+    void vectorStrategyCanRecallSemanticallyRelatedToolWithoutTokenOverlap() {
+        var config = new ContextPolicyConfig();
+        config.setStrategy("vector");
+        config.setMaxToolSchemas(4);
+        var registry = new ToolRegistry();
+        registry.register(new ToolSearchTool(registry, "anthropic"));
+        registry.register(tool("SemanticTarget", "conceptually-related capability"));
+        for (int i = 0; i < 8; i++) registry.register(tool("Noise" + i, "unrelated-" + i));
+        EmbeddingProvider fake = texts -> texts.stream()
+                .map(text -> text.contains("semantic-query") || text.contains("conceptually-related")
+                        ? new double[]{1, 0} : new double[]{0, 1})
+                .toList();
+        var conversation = new ConversationManager();
+        conversation.addUserMessage("semantic-query");
+
+        new ContextPolicy(config, fake).apply(registry, "anthropic", conversation);
+
+        assertTrue(registry.getAllSchemas("anthropic").stream()
+                .anyMatch(schema -> "SemanticTarget".equals(schema.get("name"))));
+    }
+
+    @Test
+    void embeddingFailureFallsBackToLexicalRanking() {
+        var config = new ContextPolicyConfig();
+        config.setStrategy("hybrid");
+        config.setMaxToolSchemas(4);
+        var registry = new ToolRegistry();
+        registry.register(new ToolSearchTool(registry, "anthropic"));
+        registry.register(tool("Bash", "run Gradle verification tests"));
+        for (int i = 0; i < 8; i++) registry.register(tool("Noise" + i, "unrelated-" + i));
+        EmbeddingProvider failing = texts -> { throw new IllegalStateException("offline"); };
+        var conversation = new ConversationManager();
+        conversation.addUserMessage("run Gradle verification tests");
+
+        new ContextPolicy(config, failing).apply(registry, "anthropic", conversation);
+
+        assertTrue(registry.getAllSchemas("anthropic").stream()
+                .anyMatch(schema -> "Bash".equals(schema.get("name"))));
+    }
+
     private static Tool tool(String name, String description) {
         return new Tool() {
             public String name() { return name; }

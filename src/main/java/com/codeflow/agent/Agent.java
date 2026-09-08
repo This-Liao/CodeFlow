@@ -14,8 +14,14 @@ import com.codeflow.permission.PermissionMode;
 import com.codeflow.plan.PlanFile;
 import com.codeflow.prompt.CoordinatorPrompt;
 import com.codeflow.prompt.PlanModePrompt;
+import com.codeflow.observability.Telemetry;
 import com.codeflow.tool.ToolRegistry;
 import com.codeflow.toolresult.ToolResultBudget;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.SpanKind;
+import io.opentelemetry.api.trace.StatusCode;
+import io.opentelemetry.context.Context;
+import io.opentelemetry.context.Scope;
 
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -117,23 +123,39 @@ public class Agent {
     public HookEngine getHookEngine() { return hookEngine; }
 
     public BlockingQueue<AgentEvent> run(ConversationManager conv) {
-        var queue = new LinkedBlockingQueue<AgentEvent>(64);
-        run(conv, queue);
-        return queue;
+        return start(conv).events();
     }
 
     // 使用调用方提供的 queue，允许 TUI 预先创建 queue 立即开始轮询
     public void run(ConversationManager conv, BlockingQueue<AgentEvent> queue) {
-        Thread.startVirtualThread(() -> {
-            try {
-                agentLoop(conv, queue);
-            } catch (Exception e) {
-                putSafe(queue, new AgentEvent.ErrorEvent("Agent error: " + e.getMessage()));
-            }
-        });
+        start(conv, queue);
     }
 
-    private void agentLoop(ConversationManager conv, BlockingQueue<AgentEvent> queue) {
+    /** Starts one cancellable Agent loop and returns its lifecycle handle. */
+    public AgentRunHandle start(ConversationManager conv) {
+        return start(conv, new LinkedBlockingQueue<>(64));
+    }
+
+    /** Starts one cancellable Agent loop using a caller-provided event queue. */
+    public AgentRunHandle start(ConversationManager conv, BlockingQueue<AgentEvent> queue) {
+        var handle = new AgentRunHandle(queue, this::observeEvent);
+        Context parentContext = Context.current();
+        Thread worker = Thread.ofVirtual().name("codeflow-agent-run").unstarted(() -> {
+            try (Scope ignored = parentContext.makeCurrent()) {
+                agentLoop(conv, queue, handle);
+            } catch (Exception e) {
+                if (!handle.isCancelled()) {
+                    putSafe(queue, new AgentEvent.ErrorEvent("Agent error: " + e.getMessage()));
+                }
+            }
+        });
+        handle.attach(worker);
+        worker.start();
+        return handle;
+    }
+
+    private void agentLoop(ConversationManager conv, BlockingQueue<AgentEvent> queue,
+                           AgentRunHandle runHandle) {
         String activeMemory = contextPolicy == null
                 ? memoryContent : contextPolicy.selectMemory(memoryContent, conv);
         conv.injectLongTermMemory(instructions, activeMemory);
@@ -154,7 +176,7 @@ public class Agent {
                 break;
             }
 
-            if (Thread.currentThread().isInterrupted()) break;
+            if (runHandle.isCancelled() || Thread.currentThread().isInterrupted()) break;
 
             // Drain background task notifications and inject as system reminders
             if (notificationFn != null) {
@@ -227,9 +249,9 @@ public class Agent {
             } catch (Exception ignored) {}
 
             var tools = iterToolSchemas;
-            var streamQueue = client.stream(conv, tools);
 
-            // Consume stream events, collect tool calls
+            // Consume stream events, collect tool calls. The span covers the
+            // complete streaming response rather than only client.stream().
             var text = new StringBuilder();
             var thinkingBlocks = new ArrayList<ThinkingBlock>();
             var toolCalls = new ArrayList<ToolCallInfo>();
@@ -237,55 +259,71 @@ public class Agent {
             int turnInput = 0, turnOutput = 0;
             int turnCacheRead = 0, turnCacheCreation = 0;
             boolean streamError = false;
+            Span llmSpan = Telemetry.tracer().spanBuilder("codeflow.llm.stream")
+                    .setSpanKind(SpanKind.CLIENT)
+                    .setAttribute("gen_ai.operation.name", "chat")
+                    .setAttribute("codeflow.protocol", protocol)
+                    .setAttribute("codeflow.iteration", iteration)
+                    .startSpan();
+            try (Scope ignored = llmSpan.makeCurrent()) {
+                var streamQueue = client.stream(conv, tools);
+                while (true) {
+                    StreamEvent event;
+                    try {
+                        event = streamQueue.poll(30, TimeUnit.SECONDS);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        llmSpan.setStatus(StatusCode.ERROR, "canceled");
+                        return;
+                    }
 
-            while (true) {
-                StreamEvent event;
-                try {
-                    event = streamQueue.poll(30, TimeUnit.SECONDS);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    return;
+                    if (event == null) {
+                        llmSpan.setStatus(StatusCode.ERROR, "stream timeout");
+                        putSafe(queue, new AgentEvent.ErrorEvent("Stream timeout"));
+                        return;
+                    }
+
+                    switch (event) {
+                        case StreamEvent.TextDelta td -> {
+                            text.append(td.text());
+                            putSafe(queue, new AgentEvent.StreamText(td.text()));
+                        }
+                        case StreamEvent.ThinkingDelta td ->
+                                putSafe(queue, new AgentEvent.ThinkingText(td.text()));
+                        case StreamEvent.ThinkingComplete tc -> {
+                            thinkingBlocks.add(new ThinkingBlock(tc.thinking(), tc.signature()));
+                            putSafe(queue, new AgentEvent.ThinkingComplete(tc.thinking(), tc.signature()));
+                        }
+                        case StreamEvent.ToolCallStart tcs ->
+                                putSafe(queue, new AgentEvent.ToolUseEvent(tcs.toolId(), tcs.toolName(), Map.of()));
+                        case StreamEvent.ToolCallDelta tcd -> {}
+                        case StreamEvent.ToolCallComplete tcc -> {
+                            toolCalls.add(new ToolCallInfo(tcc.toolId(), tcc.toolName(), tcc.arguments()));
+                            putSafe(queue, new AgentEvent.ToolUseEvent(
+                                    tcc.toolId(), tcc.toolName(), tcc.arguments()));
+                        }
+                        case StreamEvent.StreamEnd se -> {
+                            stopReason = se.stopReason();
+                            turnInput = se.inputTokens();
+                            turnOutput = se.outputTokens();
+                            turnCacheRead = se.cacheReadTokens();
+                            turnCacheCreation = se.cacheCreationTokens();
+                        }
+                        case StreamEvent.Error err -> {
+                            lastStreamError = err.message();
+                            llmSpan.setStatus(StatusCode.ERROR, err.message());
+                            putSafe(queue, new AgentEvent.ErrorEvent(err.message()));
+                            streamError = true;
+                        }
+                    }
+
+                    if (event instanceof StreamEvent.StreamEnd || event instanceof StreamEvent.Error) break;
                 }
-
-                if (event == null) {
-                    putSafe(queue, new AgentEvent.ErrorEvent("Stream timeout"));
-                    return;
-                }
-
-                switch (event) {
-                    case StreamEvent.TextDelta td -> {
-                        text.append(td.text());
-                        putSafe(queue, new AgentEvent.StreamText(td.text()));
-                    }
-                    case StreamEvent.ThinkingDelta td ->
-                            putSafe(queue, new AgentEvent.ThinkingText(td.text()));
-                    case StreamEvent.ThinkingComplete tc -> {
-                        thinkingBlocks.add(new ThinkingBlock(tc.thinking(), tc.signature()));
-                        putSafe(queue, new AgentEvent.ThinkingComplete(tc.thinking(), tc.signature()));
-                    }
-                    case StreamEvent.ToolCallStart tcs ->
-                            putSafe(queue, new AgentEvent.ToolUseEvent(tcs.toolId(), tcs.toolName(), Map.of()));
-                    case StreamEvent.ToolCallDelta tcd -> {}
-                    case StreamEvent.ToolCallComplete tcc -> {
-                        toolCalls.add(new ToolCallInfo(tcc.toolId(), tcc.toolName(), tcc.arguments()));
-                        putSafe(queue, new AgentEvent.ToolUseEvent(
-                                tcc.toolId(), tcc.toolName(), tcc.arguments()));
-                    }
-                    case StreamEvent.StreamEnd se -> {
-                        stopReason = se.stopReason();
-                        turnInput = se.inputTokens();
-                        turnOutput = se.outputTokens();
-                        turnCacheRead = se.cacheReadTokens();
-                        turnCacheCreation = se.cacheCreationTokens();
-                    }
-                    case StreamEvent.Error err -> {
-                        lastStreamError = err.message();
-                        putSafe(queue, new AgentEvent.ErrorEvent(err.message()));
-                        streamError = true;
-                    }
-                }
-
-                if (event instanceof StreamEvent.StreamEnd || event instanceof StreamEvent.Error) break;
+            } finally {
+                llmSpan.setAttribute("gen_ai.usage.input_tokens", (long) turnInput);
+                llmSpan.setAttribute("gen_ai.usage.output_tokens", (long) turnOutput);
+                llmSpan.setAttribute("codeflow.tool_call.count", (long) toolCalls.size());
+                llmSpan.end();
             }
 
             // Error recovery
@@ -391,7 +429,7 @@ public class Agent {
 
             // Execute tool calls
             var executor = new StreamingExecutor(registry, checker, hookEngine, queue, recoveryState,
-                    this::observeEvent);
+                    this::observeEvent, runHandle::isCancelled);
             var callInfos = toolCalls.stream()
                     .map(tc -> new StreamingExecutor.ToolCallInfo(tc.toolId, tc.toolName, tc.args))
                     .toList();
@@ -454,7 +492,9 @@ public class Agent {
         }
         } finally {
             if (!loopCompleted) {
+                boolean restoreInterrupt = Thread.interrupted();
                 putSafe(queue, new AgentEvent.LoopComplete(0));
+                if (restoreInterrupt) Thread.currentThread().interrupt();
             }
         }
     }

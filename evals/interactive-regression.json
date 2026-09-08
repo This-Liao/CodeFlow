@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "description": "通过 Remote WebSocket 真实交互链路回放的隔离 Coding Tasks。",
+  "cases": [
+    {"id": "retry-backoff", "requiredEvents": ["durable_task", "tool_use", "loop_complete"]},
+    {"id": "pagination-bounds", "requiredEvents": ["durable_task", "tool_use", "loop_complete"]},
+    {"id": "slug-normalization", "requiredEvents": ["durable_task", "tool_use", "loop_complete"]},
+    {"id": "secret-redaction", "requiredEvents": ["durable_task", "tool_use", "loop_complete"]},
+    {"id": "duration-parser", "requiredEvents": ["durable_task", "tool_use", "loop_complete"]},
+    {"id": "deep-config-merge", "requiredEvents": ["durable_task", "tool_use", "loop_complete"]},
+    {"id": "dependency-order", "requiredEvents": ["durable_task", "tool_use", "loop_complete"]},
+    {"id": "stable-chunking", "requiredEvents": ["durable_task", "tool_use", "loop_complete"]},
+    {"id": "http-retry-classifier", "requiredEvents": ["durable_task", "tool_use", "loop_complete"]},
+    {"id": "circuit-breaker", "requiredEvents": ["durable_task", "tool_use", "loop_complete"]},
+    {"id": "header-normalization", "requiredEvents": ["durable_task", "tool_use", "loop_complete"]},
+    {"id": "safe-path-join", "requiredEvents": ["durable_task", "tool_use", "loop_complete"]}
+  ]
+}

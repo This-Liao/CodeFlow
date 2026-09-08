@@ -12,6 +12,12 @@ from typing import Any, TypedDict
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from langgraph.graph import END, START, StateGraph
+from opentelemetry import context, propagate, trace
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.trace import SpanKind
 
 
 class AnalysisState(TypedDict):
@@ -84,9 +90,52 @@ builder.add_edge("analyze", "render")
 builder.add_edge("render", END)
 GRAPH = builder.compile()
 
+
+def _trace_endpoint(value: str) -> str:
+    endpoint = value.rstrip("/")
+    if os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT") or endpoint.endswith("/v1/traces"):
+        return endpoint
+    return endpoint + "/v1/traces"
+
+
+def _configure_telemetry() -> None:
+    if os.getenv("OTEL_SDK_DISABLED", "").lower() in {"true", "1", "yes", "on"}:
+        return
+    provider = TracerProvider(
+        resource=Resource.create(
+            {"service.name": os.getenv("OTEL_SERVICE_NAME", "codeflow-python-a2a")}
+        )
+    )
+    endpoint = os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT") or os.getenv(
+        "OTEL_EXPORTER_OTLP_ENDPOINT"
+    )
+    if endpoint:
+        provider.add_span_processor(
+            BatchSpanProcessor(OTLPSpanExporter(endpoint=_trace_endpoint(endpoint)))
+        )
+    trace.set_tracer_provider(provider)
+
+
+_configure_telemetry()
+TRACER = trace.get_tracer("com.codeflow.a2a.python")
+
 app = FastAPI(title="CodeFlow A2A Static Analysis Agent", version="1.0.0")
 TASKS: dict[str, dict[str, Any]] = {}
 RUNNERS: dict[str, asyncio.Task[None]] = {}
+
+
+@app.middleware("http")
+async def trace_a2a_request(request: Request, call_next):  # type: ignore[no-untyped-def]
+    parent = propagate.extract(dict(request.headers))
+    route = request.url.path
+    with TRACER.start_as_current_span(
+        f"{request.method} {route}", context=parent, kind=SpanKind.SERVER
+    ) as span:
+        span.set_attribute("http.request.method", request.method)
+        span.set_attribute("url.path", route)
+        response = await call_next(request)
+        span.set_attribute("http.response.status_code", response.status_code)
+        return response
 
 
 def _base_url(request: Request) -> str:
@@ -118,37 +167,44 @@ async def agent_card(request: Request) -> dict[str, Any]:
     }
 
 
-async def _run_task(task_id: str, prompt: str) -> None:
+async def _run_task(task_id: str, prompt: str, parent_context: context.Context) -> None:
     task = TASKS[task_id]
-    try:
-        root = Path(os.getenv("CODEFLOW_ANALYSIS_ROOT", ".")).resolve()
-        task["status"] = {"state": "TASK_STATE_WORKING"}
-        result = await GRAPH.ainvoke(
-            {"request": prompt, "root": str(root), "files": [], "findings": [], "report": ""}
-        )
-        task["artifacts"] = [
-            {
-                "artifactId": str(uuid.uuid4()),
-                "name": "static-analysis-report",
-                "description": "Human-readable summary and structured findings",
-                "parts": [
-                    {"text": result["report"], "mediaType": "text/markdown", "filename": "report.md"},
-                    {"data": {"findings": result["findings"]}, "mediaType": "application/json", "filename": "findings.json"},
-                ],
+    with TRACER.start_as_current_span(
+        "codeflow.a2a.task.execute", context=parent_context, kind=SpanKind.INTERNAL
+    ) as span:
+        span.set_attribute("codeflow.a2a.task.id", task_id)
+        trace_id = f"{span.get_span_context().trace_id:032x}"
+        task["metadata"] = {"traceId": trace_id}
+        try:
+            root = Path(os.getenv("CODEFLOW_ANALYSIS_ROOT", ".")).resolve()
+            task["status"] = {"state": "TASK_STATE_WORKING"}
+            result = await GRAPH.ainvoke(
+                {"request": prompt, "root": str(root), "files": [], "findings": [], "report": ""}
+            )
+            task["artifacts"] = [
+                {
+                    "artifactId": str(uuid.uuid4()),
+                    "name": "static-analysis-report",
+                    "description": "Human-readable summary and structured findings",
+                    "parts": [
+                        {"text": result["report"], "mediaType": "text/markdown", "filename": "report.md"},
+                        {"data": {"findings": result["findings"], "traceId": trace_id}, "mediaType": "application/json", "filename": "findings.json"},
+                    ],
+                }
+            ]
+            task["status"] = {
+                "state": "TASK_STATE_COMPLETED",
+                "message": {"role": "ROLE_AGENT", "parts": [{"text": "Static analysis completed."}]},
             }
-        ]
-        task["status"] = {
-            "state": "TASK_STATE_COMPLETED",
-            "message": {"role": "ROLE_AGENT", "parts": [{"text": "Static analysis completed."}]},
-        }
-    except asyncio.CancelledError:
-        task["status"] = {"state": "TASK_STATE_CANCELED"}
-        raise
-    except Exception as exc:  # task errors belong in A2A status, not a broken HTTP connection
-        task["status"] = {
-            "state": "TASK_STATE_FAILED",
-            "message": {"role": "ROLE_AGENT", "parts": [{"text": f"Analysis failed: {exc}"}]},
-        }
+        except asyncio.CancelledError:
+            task["status"] = {"state": "TASK_STATE_CANCELED"}
+            raise
+        except Exception as exc:  # task errors belong in A2A status, not a broken HTTP connection
+            span.record_exception(exc)
+            task["status"] = {
+                "state": "TASK_STATE_FAILED",
+                "message": {"role": "ROLE_AGENT", "parts": [{"text": f"Analysis failed: {exc}"}]},
+            }
 
 
 @app.post("/a2a/v1/message:send")
@@ -166,7 +222,8 @@ async def send_message(payload: dict[str, Any]) -> dict[str, Any]:
         "history": [message],
     }
     TASKS[task_id] = task
-    RUNNERS[task_id] = asyncio.create_task(_run_task(task_id, text))
+    parent_context = context.get_current()
+    RUNNERS[task_id] = asyncio.create_task(_run_task(task_id, text, parent_context))
     return {"task": task}
 
 

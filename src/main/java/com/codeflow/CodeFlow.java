@@ -91,20 +91,6 @@ public class CodeFlow {
             }
         }
 
-        if (resumeTaskId != null && printPrompt == null) {
-            try {
-                final String requestedTaskId = resumeTaskId;
-                printPrompt = new com.codeflow.durable.DurableTaskStore(System.getProperty("user.dir"))
-                        .get(requestedTaskId)
-                        .orElseThrow(() -> new IllegalArgumentException("durable task not found: " + requestedTaskId))
-                        .getPrompt();
-            } catch (RuntimeException e) {
-                System.err.println("Cannot resume durable task: " + e.getMessage());
-                System.exit(1);
-                return;
-            }
-        }
-
         if (evalTracePath != null) {
             var output = com.codeflow.eval.EvalReportGenerator.write(
                     java.nio.file.Path.of(evalTracePath),
@@ -133,6 +119,22 @@ public class CodeFlow {
             return;
         }
 
+        if (resumeTaskId != null && printPrompt == null) {
+            try {
+                final String requestedTaskId = resumeTaskId;
+                printPrompt = com.codeflow.durable.DurableRepositoryFactory
+                        .create(System.getProperty("user.dir"), config.getDurableStore())
+                        .get(requestedTaskId)
+                        .orElseThrow(() -> new IllegalArgumentException(
+                                "durable task not found: " + requestedTaskId))
+                        .getPrompt();
+            } catch (RuntimeException e) {
+                System.err.println("Cannot resume durable task: " + e.getMessage());
+                System.exit(1);
+                return;
+            }
+        }
+
         // -p 模式：非交互式运行，输出结果到 stdout
         if (printPrompt != null) {
             PrintMode.OutputFormat fmt = "stream-json".equals(outputFormat)
@@ -150,6 +152,7 @@ public class CodeFlow {
                     config.getMcpServers() != null ? config.getMcpServers() : List.of(),
                     config.getA2aAgents() != null ? config.getA2aAgents() : List.of(),
                     config.getContextPolicy(),
+                    config.getDurableStore(),
                     config.getHooks() != null ? config.getHooks() : List.of(),
                     remoteAddr,
                     config.isEnableCoordinatorMode(),
@@ -170,6 +173,7 @@ public class CodeFlow {
                 config.getMcpServers() != null ? config.getMcpServers() : List.of(),
                 config.getA2aAgents() != null ? config.getA2aAgents() : List.of(),
                 config.getContextPolicy(),
+                config.getDurableStore(),
                 config.getHooks() != null ? config.getHooks() : List.of(),
                 config.isEnableCoordinatorMode(),
                 !config.isForkEnabled()
